@@ -577,6 +577,24 @@ def test_no_glyph_spacing_seed_anywhere():
         )
 
 
+def test_macos_gpu_registers_the_cross_os_font_bundle_before_rendering():
+    patch = (BROWSER / "patches" / "font-hijacker.patch").read_text(encoding="utf-8")
+    required = (
+        "diff --git a/gfx/thebes/gfxPlatformMac.cpp",
+        "processType == GeckoProcessType_GPU",
+        "XRE_GetProcessType() == GeckoProcessType_GPU",
+        "WaitForFontRegistration();",
+        "StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0",
+        "MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS",
+        "PlatformFontListClass::ActivateFontsFromDir(path);",
+    )
+    missing = [snippet for snippet in required if snippet not in patch]
+    assert not missing, (
+        f"the macOS GPU font-registration path lost: {missing}"
+        + explain("macos-gpu-registers-bundled-fonts")
+    )
+
+
 def test_no_canvas_seed_is_declared_or_sent():
     """Nothing in the browser reads a canvas seed, so neither launcher sends one."""
     declared = _live_properties()

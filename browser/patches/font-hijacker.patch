@@ -128,7 +128,7 @@ index 63169b05b7..5b659113f3 100644
    }
    *aHasCurrentFile = hasMore;
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 2ea46a9810..039316b8d6 100644
+index e23f7c4df7..b0aac2e38a 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -6,6 +6,7 @@
@@ -139,7 +139,7 @@ index 2ea46a9810..039316b8d6 100644
  #include "SharedFontList-impl.h"
  #include "base/eintr_wrapper.h"
  #include "gfxScriptItemizer.h"
-@@ -900,6 +901,29 @@ void gfxPlatformFontList::GenerateFontListKey(nsACString& aKeyName) {
+@@ -902,6 +903,29 @@ void gfxPlatformFontList::GenerateFontListKey(nsACString& aKeyName) {
    ToLowerCase(aKeyName);
  }
  
@@ -169,7 +169,7 @@ index 2ea46a9810..039316b8d6 100644
  // Used if a stylo thread wants to trigger InitOtherFamilyNames in the main
  // process: we can't do IPC from the stylo thread so we post this to the main
  // thread instead.
-@@ -1428,6 +1452,17 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1430,6 +1454,17 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      uint32_t aNextCh, Script aRunScript, FontPresentation aPresentation,
      const gfxFontStyle* aMatchStyle, uint32_t& aCmapCount,
      FontFamily& aMatchedFamily) {
@@ -187,7 +187,7 @@ index 2ea46a9810..039316b8d6 100644
    bool useCmaps = IsFontFamilyWhitelistActive() ||
                    gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
    FontVisibility level = aFontVisibilityProvider
-@@ -1437,7 +1472,22 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1439,7 +1474,22 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      // Allow platform-specific fallback code to try and find a usable font
      gfxFontEntry* fe = PlatformGlobalFontFallback(
          aFontVisibilityProvider, aCh, aRunScript, aMatchStyle, aMatchedFamily);
@@ -211,7 +211,7 @@ index 2ea46a9810..039316b8d6 100644
        if (aMatchedFamily.mShared) {
          if (IsVisibleToCSS(*aMatchedFamily.mShared, level)) {
            RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
-@@ -1478,6 +1528,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1480,6 +1530,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
          if (!IsVisibleToCSS(family, level)) {
            continue;
          }
@@ -223,7 +223,7 @@ index 2ea46a9810..039316b8d6 100644
          if (!family.IsFullyInitialized() &&
              StaticPrefs::gfx_font_rendering_fallback_async() &&
              !XRE_IsParentProcess()) {
-@@ -1504,6 +1559,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1506,6 +1561,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        if (!IsVisibleToCSS(*family, level)) {
          continue;
        }
@@ -237,7 +237,7 @@ index 2ea46a9810..039316b8d6 100644
        // evaluate all fonts in this family for a match
        family->FindFontForChar(&data);
        if (data.mMatchDistance == 0.0) {
-@@ -1732,6 +1794,11 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -1744,6 +1806,11 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
        aFontVisibilityProvider ? aFontVisibilityProvider->GetFontVisibility()
                                : FontVisibility::User;
  
@@ -250,7 +250,7 @@ index 2ea46a9810..039316b8d6 100644
    // font-family request by the page), and RFP settings allow generics to be
    // unrestricted, bump the effective visibility level applied here so as to
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index 66290cd704..bdd4b52666 100644
+index ccb2100a52..f8a5f8b748 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
 @@ -649,6 +649,19 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
@@ -273,6 +273,60 @@ index 66290cd704..bdd4b52666 100644
    static void FontWhitelistPrefChanged(const char* aPref, void* aClosure);
  
    bool AddWithLegacyFamilyName(const nsACString& aLegacyName,
+diff --git a/gfx/thebes/gfxPlatformMac.cpp b/gfx/thebes/gfxPlatformMac.cpp
+index 61fb01d3dc..6396216f90 100644
+--- a/gfx/thebes/gfxPlatformMac.cpp
++++ b/gfx/thebes/gfxPlatformMac.cpp
+@@ -30,6 +30,7 @@
+ #include "qcms.h"
+ 
+ #ifdef MOZ_BUNDLED_FONTS
++#  include "MaskConfig.hpp"
+ #  include "mozilla/StaticPrefs_gfx.h"
+ #  include "nsDirectoryServiceDefs.h"
+ #endif
+@@ -89,7 +90,9 @@ PRThread* gfxPlatformMac::sFontRegistrationThread = nullptr;
+ /* static */
+ gfxPlatformMac::SupplementalFontThread
+ gfxPlatformMac::RegisterSupplementalFonts() {
+-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
++  const auto processType = XRE_GetProcessType();
++  if (processType == GeckoProcessType_Default ||
++      processType == GeckoProcessType_GPU) {
+     // We activate the fonts on a separate thread, to minimize the startup-
+     // time cost.
+     sFontRegistrationThread = PR_CreateThread(
+@@ -108,6 +111,30 @@ void gfxPlatformMac::WaitForFontRegistration() {
+ }
+ 
+ gfxPlatformMac::gfxPlatformMac() {
++#ifdef MOZ_BUNDLED_FONTS
++  if (XRE_GetProcessType() == GeckoProcessType_GPU) {
++    // The parent shapes browser chrome text, while WebRender rasterizes it in
++    // the GPU process. Both CoreText font databases must contain the same
++    // process-scoped fonts or glyph IDs can be painted from a different face.
++    // See Mozilla bugs 1803406 and 1866105.
++    WaitForFontRegistration();
++    const bool camouNativeIdentity =
++        MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS;
++    if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0 &&
++        !camouNativeIdentity) {
++      nsCOMPtr<nsIFile> localDir;
++      if (NS_SUCCEEDED(
++              NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir))) &&
++          NS_SUCCEEDED(localDir->Append(u"fonts"_ns))) {
++        nsAutoCString path;
++        if (NS_SUCCEEDED(localDir->GetNativePath(path))) {
++          PlatformFontListClass::ActivateFontsFromDir(path);
++        }
++      }
++    }
++  }
++#endif
++
+   mFontAntiAliasingThreshold = ReadAntiAliasingThreshold();
+ 
+   InitBackendPrefs(GetBackendPrefs());
 diff --git a/gfx/thebes/gfxUserFontSet.cpp b/gfx/thebes/gfxUserFontSet.cpp
 index 084c269bde..4507ab9927 100644
 --- a/gfx/thebes/gfxUserFontSet.cpp

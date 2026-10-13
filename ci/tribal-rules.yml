@@ -156,6 +156,27 @@ rules:
       allowed_forms: ["-e ../../../python", "-e ./python", "-e python"]
 
   # -------------------------------------------------------------------------
+  # Fonts
+  # -------------------------------------------------------------------------
+
+  - id: macos-gpu-registers-bundled-fonts
+    title: The macOS GPU process registers the same bundled fonts as the parent
+    check: automated
+    evidence:
+      - "Mozilla bug 1803406: different CoreText font databases in layout and painting processes produce garbled text"
+      - "Mozilla bug 1866105: WebRender font descriptors need the source path to resolve duplicate PostScript names consistently"
+      - "v156.0.1-beta.38 on macOS 15.4.1: foreign-OS identities garbled browser chrome while a native macOS identity and explicit page fonts rendered normally"
+    rationale: >-
+      The parent process registers the cross-OS bundle before it shapes browser
+      chrome, but WebRender rasterizes those glyph IDs in the GPU process. The
+      package contains fonts from three operating systems, including duplicate
+      PostScript names, so an unregistered GPU process can resolve a name to a
+      different face and paint unrelated glyphs. The GPU must first finish the
+      same supplemental-font registration, then activate the bundle under the
+      same pref and claimed-OS conditions as the parent. A native macOS identity
+      must still leave the bundle inactive.
+
+  # -------------------------------------------------------------------------
   # Measurement
   # -------------------------------------------------------------------------
 
