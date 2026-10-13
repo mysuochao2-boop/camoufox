@@ -159,22 +159,23 @@ rules:
   # Fonts
   # -------------------------------------------------------------------------
 
-  - id: macos-gpu-registers-bundled-fonts
-    title: The macOS GPU process registers the same bundled fonts as the parent
+  - id: macos-webrender-uses-exact-bundled-font-data
+    title: macOS WebRender receives the exact bundled font face selected for shaping
     check: automated
     evidence:
       - "Mozilla bug 1803406: different CoreText font databases in layout and painting processes produce garbled text"
       - "Mozilla bug 1866105: WebRender font descriptors need the source path to resolve duplicate PostScript names consistently"
       - "v156.0.1-beta.38 on macOS 15.4.1: foreign-OS identities garbled browser chrome while a native macOS identity and explicit page fonts rendered normally"
+      - "A beta.32 build registering the same bundle in the parent and GPU processes still painted unrelated glyphs for a Windows identity"
     rationale: >-
-      The parent process registers the cross-OS bundle before it shapes browser
-      chrome, but WebRender rasterizes those glyph IDs in the GPU process. The
-      package contains fonts from three operating systems, including duplicate
-      PostScript names, so an unregistered GPU process can resolve a name to a
-      different face and paint unrelated glyphs. The GPU must first finish the
-      same supplemental-font registration, then activate the bundle under the
-      same pref and claimed-OS conditions as the parent. A native macOS identity
-      must still leave the bundle inactive.
+      The parent process shapes browser chrome, while WebRender rasterizes its
+      glyph IDs in the GPU process. The cross-OS bundle contains collections and
+      duplicate PostScript names, so even matching CoreText registrations can
+      resolve a descriptor to a different face and paint unrelated glyphs.
+      Bundled fonts must therefore use Firefox's existing raw-font fallback,
+      which serializes the tables from the selected CGFont. System fonts retain
+      the cheaper descriptor path, and failure to identify a bundled path retains
+      normal descriptor behaviour rather than silently substituting a font.
 
   # -------------------------------------------------------------------------
   # Measurement

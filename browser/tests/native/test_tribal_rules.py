@@ -577,21 +577,21 @@ def test_no_glyph_spacing_seed_anywhere():
         )
 
 
-def test_macos_gpu_registers_the_cross_os_font_bundle_before_rendering():
+def test_macos_webrender_uses_exact_cross_os_font_data():
     patch = (BROWSER / "patches" / "font-hijacker.patch").read_text(encoding="utf-8")
     required = (
-        "diff --git a/gfx/thebes/gfxPlatformMac.cpp",
-        "processType == GeckoProcessType_GPU",
-        "XRE_GetProcessType() == GeckoProcessType_GPU",
-        "WaitForFontRegistration();",
-        "StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0",
-        "MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS",
-        "PlatformFontListClass::ActivateFontsFromDir(path);",
+        "diff --git a/gfx/2d/ScaledFontMac.cpp",
+        "NS_GetSpecialDirectory(NS_GRE_DIR",
+        'bundledFonts->AppendNative("fonts"_ns)',
+        "NS_NewLocalFile(NS_ConvertUTF8toUTF16(cstr)",
+        "bundledFonts->Contains(fontFile, &isBundledFont)",
+        "isBundledFont) {",
+        "return false;",
     )
     missing = [snippet for snippet in required if snippet not in patch]
     assert not missing, (
-        f"the macOS GPU font-registration path lost: {missing}"
-        + explain("macos-gpu-registers-bundled-fonts")
+        f"the macOS raw bundled-font path lost: {missing}"
+        + explain("macos-webrender-uses-exact-bundled-font-data")
     )
 
 

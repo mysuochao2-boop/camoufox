@@ -1,3 +1,50 @@
+diff --git a/gfx/2d/ScaledFontMac.cpp b/gfx/2d/ScaledFontMac.cpp
+index 1e440d7352..e11ae4da5e 100644
+--- a/gfx/2d/ScaledFontMac.cpp
++++ b/gfx/2d/ScaledFontMac.cpp
+@@ -8,5 +8,9 @@
+ #include "mozilla/webrender/WebRenderTypes.h"
+ #ifdef MOZ_WIDGET_COCOA
+ #  include "nsCocoaFeatures.h"
++#  include "nsDirectoryServiceDefs.h"
++#  include "nsDirectoryServiceUtils.h"
++#  include "nsIFile.h"
++#  include "nsXPCOM.h"
+ #endif
+ #include <dlfcn.h>
+@@ -398,7 +402,8 @@ bool UnscaledFontMac::GetFontDescriptor(FontDescriptorOutput aCb,
+   AutoRelease<CFURLRef> fontUrl(
+       (CFURLRef)CTFontCopyAttribute(ctFont, kCTFontURLAttribute));
+   if (fontUrl) {
+-    CFStringRef urlStr(CFURLCopyFileSystemPath(fontUrl, kCFURLPOSIXPathStyle));
++    AutoRelease<CFStringRef> urlStr(
++        CFURLCopyFileSystemPath(fontUrl, kCFURLPOSIXPathStyle));
+     cstr = CFStringGetCStringPtr(urlStr, kCFStringEncodingUTF8);
+     if (!cstr) {
+       if (!CFStringGetCString(urlStr, buf, sizeof(buf),
+@@ -407,5 +412,22 @@ bool UnscaledFontMac::GetFontDescriptor(FontDescriptorOutput aCb,
+       }
+       cstr = buf;
+     }
++#ifdef MOZ_WIDGET_COCOA
++    nsCOMPtr<nsIFile> bundledFonts;
++    nsCOMPtr<nsIFile> fontFile;
++    bool isBundledFont = false;
++    if (NS_SUCCEEDED(NS_GetSpecialDirectory(
++            NS_GRE_DIR, getter_AddRefs(bundledFonts))) &&
++        NS_SUCCEEDED(bundledFonts->AppendNative("fonts"_ns)) &&
++        NS_SUCCEEDED(NS_NewLocalFile(NS_ConvertUTF8toUTF16(cstr),
++                                     getter_AddRefs(fontFile))) &&
++        NS_SUCCEEDED(bundledFonts->Contains(fontFile, &isBundledFont)) &&
++        isBundledFont) {
++      // WebRender must rasterize the exact face selected while shaping. The
++      // cross-OS bundle contains duplicate PostScript names, so asking the GPU
++      // process to resolve a descriptor can select a different face.
++      return false;
++    }
++#endif
+     descriptor.Append(cstr);
+   }
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
 index b6696c70c4..4727cae871 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
