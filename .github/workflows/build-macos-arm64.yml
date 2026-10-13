@@ -1,0 +1,71 @@
+name: Build macOS ARM64
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: build-macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    env:
+      BUILD_TARGET: macos,arm64
+      PYTHON_VERSION: "3.12"
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@8831c82abf29b34eb2caac48d5f999ecfc0d8eef # v4.1
+        with:
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+          remove-cached-tools: "true"
+          remove-swapfile: "true"
+          verbose: "false"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 ccache clang-18 fontconfig lld-18 p7zip-full
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+
+      - name: Fetch the font bundle
+        working-directory: browser
+        run: make fonts-extract
+
+      - name: Prepare Firefox and toolchains
+        run: python3 -m ci.run_prepare
+
+      - name: Create swap space
+        run: |
+          sudo fallocate -l 24G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+      - name: Build and package
+        working-directory: browser
+        run: python3 multibuild.py --target macos --arch arm64
+
+      - name: Upload browser package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Camoufox-macos-arm64-${{ github.sha }}
+          path: browser/dist/*
+          if-no-files-found: error
+          retention-days: 14
