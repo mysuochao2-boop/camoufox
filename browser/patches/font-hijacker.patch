@@ -1,50 +1,3 @@
-diff --git a/gfx/2d/ScaledFontMac.cpp b/gfx/2d/ScaledFontMac.cpp
-index 1e440d7352..e11ae4da5e 100644
---- a/gfx/2d/ScaledFontMac.cpp
-+++ b/gfx/2d/ScaledFontMac.cpp
-@@ -8,5 +8,9 @@
- #include "mozilla/webrender/WebRenderTypes.h"
- #ifdef MOZ_WIDGET_COCOA
- #  include "nsCocoaFeatures.h"
-+#  include "nsDirectoryServiceDefs.h"
-+#  include "nsDirectoryServiceUtils.h"
-+#  include "nsIFile.h"
-+#  include "nsXPCOM.h"
- #endif
- #include <dlfcn.h>
-@@ -398,7 +402,8 @@ bool UnscaledFontMac::GetFontDescriptor(FontDescriptorOutput aCb,
-   AutoRelease<CFURLRef> fontUrl(
-       (CFURLRef)CTFontCopyAttribute(ctFont, kCTFontURLAttribute));
-   if (fontUrl) {
--    CFStringRef urlStr(CFURLCopyFileSystemPath(fontUrl, kCFURLPOSIXPathStyle));
-+    AutoRelease<CFStringRef> urlStr(
-+        CFURLCopyFileSystemPath(fontUrl, kCFURLPOSIXPathStyle));
-     cstr = CFStringGetCStringPtr(urlStr, kCFStringEncodingUTF8);
-     if (!cstr) {
-       if (!CFStringGetCString(urlStr, buf, sizeof(buf),
-@@ -407,5 +412,22 @@ bool UnscaledFontMac::GetFontDescriptor(FontDescriptorOutput aCb,
-       }
-       cstr = buf;
-     }
-+#ifdef MOZ_WIDGET_COCOA
-+    nsCOMPtr<nsIFile> bundledFonts;
-+    nsCOMPtr<nsIFile> fontFile;
-+    bool isBundledFont = false;
-+    if (NS_SUCCEEDED(NS_GetSpecialDirectory(
-+            NS_GRE_DIR, getter_AddRefs(bundledFonts))) &&
-+        NS_SUCCEEDED(bundledFonts->AppendNative("fonts"_ns)) &&
-+        NS_SUCCEEDED(NS_NewLocalFile(NS_ConvertUTF8toUTF16(cstr),
-+                                     getter_AddRefs(fontFile))) &&
-+        NS_SUCCEEDED(bundledFonts->Contains(fontFile, &isBundledFont)) &&
-+        isBundledFont) {
-+      // WebRender must rasterize the exact face selected while shaping. The
-+      // cross-OS bundle contains duplicate PostScript names, so asking the GPU
-+      // process to resolve a descriptor can select a different face.
-+      return false;
-+    }
-+#endif
-     descriptor.Append(cstr);
-   }
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
 index b6696c70c4..4727cae871 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
@@ -414,6 +367,46 @@ index a9f68b0563..d3dede3ae0 100644
 +
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
+diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
+index 3e18b99ada..cd55e501de 100644
+--- a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
++++ b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
+@@ -20,6 +20,7 @@ use core_graphics::geometry::{CGAffineTransform, CGPoint, CGSize};
+ use core_graphics::geometry::{CG_AFFINE_TRANSFORM_IDENTITY, CGRect};
+ use core_text::font::CTFont;
+ use core_text::font_descriptor::{CTFontDescriptor, kCTFontDefaultOrientation};
++use core_text::font_descriptor::kCTFontNameAttribute;
+ use core_text::font_descriptor::{kCTFontURLAttribute, kCTFontVariationAttribute};
+ use core_text::font_manager;
+ use euclid::default::Size2D;
+@@ -300,6 +301,18 @@ impl FontContext {
+                 }
+             };
+             core_text::font::new_from_CGFont(&cg_font, 0.).copy_descriptor()
++        } else if native_font_handle.path.len() > 0 {
++            // Build an unresolved descriptor with both attributes. Adding the
++            // URL after resolving by name can retain the wrong cached face.
++            let cf_path = CFString::new(&native_font_handle.path);
++            let font_url = CFURL::from_file_system_path(cf_path, kCFURLPOSIXPathStyle, false);
++            let name_attribute = unsafe { CFString::wrap_under_get_rule(kCTFontNameAttribute) };
++            let url_attribute = unsafe { CFString::wrap_under_get_rule(kCTFontURLAttribute) };
++            let attrs = CFDictionary::from_CFType_pairs(&[
++                (name_attribute, cf_name.as_CFType()),
++                (url_attribute, font_url.as_CFType()),
++            ]);
++            core_text::font_descriptor::new_from_attributes(&attrs)
+         } else {
+             core_text::font_descriptor::new_from_postscript_name(&cf_name)
+         };
+@@ -307,6 +320,5 @@ impl FontContext {
+-        // If the NativeFontHandle includes a file path, add this to the descriptor
+-        // to disambiguate cases where multiple installed fonts have the same psname.
+-        if native_font_handle.path.len() > 0 {
++        // Hidden system fonts still need the CGFont-based descriptor path above.
++        if native_font_handle.name.starts_with('.') && native_font_handle.path.len() > 0 {
+             let cf_path = CFString::new(&native_font_handle.path);
+             let url_attribute = unsafe { CFString::wrap_under_get_rule(kCTFontURLAttribute) };
+             let attrs = CFDictionary::from_CFType_pairs(&[
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 index 4b89cbf319..57690f6e1b 100644
 --- a/layout/style/moz.build

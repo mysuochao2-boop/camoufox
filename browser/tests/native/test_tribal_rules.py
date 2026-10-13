@@ -577,20 +577,20 @@ def test_no_glyph_spacing_seed_anywhere():
         )
 
 
-def test_macos_webrender_uses_exact_cross_os_font_data():
+def test_macos_webrender_uses_exact_cross_os_font_descriptor():
     patch = (BROWSER / "patches" / "font-hijacker.patch").read_text(encoding="utf-8")
     required = (
-        "diff --git a/gfx/2d/ScaledFontMac.cpp",
-        "NS_GetSpecialDirectory(NS_GRE_DIR",
-        'bundledFonts->AppendNative("fonts"_ns)',
-        "NS_NewLocalFile(NS_ConvertUTF8toUTF16(cstr)",
-        "bundledFonts->Contains(fontFile, &isBundledFont)",
-        "isBundledFont) {",
-        "return false;",
+        "diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs",
+        "kCTFontNameAttribute",
+        "let name_attribute =",
+        "let url_attribute =",
+        "(name_attribute, cf_name.as_CFType())",
+        "(url_attribute, font_url.as_CFType())",
+        "font_descriptor::new_from_attributes(&attrs)",
     )
     missing = [snippet for snippet in required if snippet not in patch]
-    assert not missing, (
-        f"the macOS raw bundled-font path lost: {missing}"
+    assert not missing and "diff --git a/gfx/2d/ScaledFontMac.cpp" not in patch, (
+        f"the macOS exact bundled-font descriptor path was lost: {missing}"
         + explain("macos-webrender-uses-exact-bundled-font-data")
     )
 

@@ -167,15 +167,16 @@ rules:
       - "Mozilla bug 1866105: WebRender font descriptors need the source path to resolve duplicate PostScript names consistently"
       - "v156.0.1-beta.38 on macOS 15.4.1: foreign-OS identities garbled browser chrome while a native macOS identity and explicit page fonts rendered normally"
       - "A beta.32 build registering the same bundle in the parent and GPU processes still painted unrelated glyphs for a Windows identity"
+      - "A beta.32 build sending selected CGFont table data avoided name lookup but blocked startup on the 2 GB cross-OS font bundle"
     rationale: >-
       The parent process shapes browser chrome, while WebRender rasterizes its
       glyph IDs in the GPU process. The cross-OS bundle contains collections and
       duplicate PostScript names, so even matching CoreText registrations can
-      resolve a descriptor to a different face and paint unrelated glyphs.
-      Bundled fonts must therefore use Firefox's existing raw-font fallback,
-      which serializes the tables from the selected CGFont. System fonts retain
-      the cheaper descriptor path, and failure to identify a bundled path retains
-      normal descriptor behaviour rather than silently substituting a font.
+      resolve a name-only descriptor to a different face and paint unrelated
+      glyphs. The WebRender descriptor must be created once with both the
+      PostScript name and source URL, before CoreText resolves or caches it.
+      Adding the URL after name resolution is too late. Sending raw font tables
+      is not acceptable because large CJK collections block browser startup.
 
   # -------------------------------------------------------------------------
   # Measurement
