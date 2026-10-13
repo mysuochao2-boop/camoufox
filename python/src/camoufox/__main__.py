@@ -880,6 +880,19 @@ def server():
     launch_server()
 
 
+@cli.command(name="desktop")
+def desktop():
+    """Open the desktop environment manager."""
+    try:
+        from .desktop.main import main
+    except ImportError as error:
+        if error.name and error.name.startswith("PySide6"):
+            rprint('Desktop UI requires: pip install -U "camoufox[desktop]"', fg="red")
+            return
+        raise
+    main()
+
+
 class VersionInfo:
     def __init__(self):
         from rich.table import Table

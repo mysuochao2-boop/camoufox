@@ -49,9 +49,11 @@ language-tags = "*"
 pysocks = "*"
 inquirer = "*"
 maxminddb = {version = "*", optional = true}
+PySide6-Essentials = {version = ">=6.7,<7", optional = true}
 
 [tool.poetry.extras]
 geoip = ["maxminddb"]
+desktop = ["PySide6-Essentials", "maxminddb"]
 
 [tool.poetry.scripts]
 camoufox = "camoufox.__main__:cli"

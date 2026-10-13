@@ -320,6 +320,7 @@ an automation layer the page cannot see.
 | Package | Install | Docs |
 |---|---|---|
 | Python | `pip install -U "camoufox[geoip]"` | [`python/README.md`](python/README.md) |
+| Desktop environment manager | `pip install -U "camoufox[desktop]"` | [`python/README.md`](python/README.md#install) |
 | TypeScript / Node.js | `npm install camoufox playwright-core` | [`typescript/README.md`](typescript/README.md) |
 | AI coding agents | | [`AGENTS.md`](AGENTS.md#using-camoufox) |
 
@@ -525,6 +526,7 @@ claims the host's OS. Details are in
 | Headed browser on a private Xvfb display (Linux) | `headless="virtual"` |
 | Remote Playwright server for other languages | `launch_server()`, `camoufox server` |
 | Install, pin and switch browser builds | `camoufox fetch`, `set`, `list`, `remove` |
+| Manage persistent identities and proxies in a desktop app | `camoufox desktop` |
 | Core count that a page can measure | `pin_cpu_cores=True` |
 | Block images, WebRTC or WebGL | `block_images`, `block_webrtc`, `block_webgl` |
 | The host's GPU on the host's OS; random canvas readback, as in LibreWolf, on another OS | default; `canvas_noise=True` or `False` to choose |
