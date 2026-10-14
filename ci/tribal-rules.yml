@@ -161,13 +161,18 @@ rules:
     evidence:
       - "SocksBridge docs/FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md sections 1, 5, 6 and 14"
       - "https://github.com/mysuochao2-boop/socksbridge/blob/main/docs/FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md"
+      - "Mihomo common proxy fields: ip-version controls the address used to reach a domain-named outbound proxy"
+      - "https://wiki.metacubex.one/en/config/proxies/#ip-version"
     rationale: >-
       Auto and Random routes change an identity's network fingerprint, while a
       DIRECT fallback reveals its real network. Desktop therefore accepts only
       stable proxy-NNN SocksBridge routes, validates Mihomo before launching the
       browser, rejects unmatched and UDP traffic, and closes the browser if the
-      managed core exits. Subscription credentials stay in the operating-system
-      keychain rather than the environment JSON or a process argument.
+      managed core exits. The gateway connection accepts both IP families and
+      prefers IPv6 without adding a direct route, because a host may reach only
+      one of the gateway domain's address families. Subscription credentials
+      stay in the operating-system keychain rather than the environment JSON or
+      a process argument.
 
   # -------------------------------------------------------------------------
   # Fonts

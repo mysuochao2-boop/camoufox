@@ -83,7 +83,7 @@ def build_mihomo_config(
         "allow-lan": False,
         "mode": "rule",
         "log-level": "warning",
-        "ipv6": False,
+        "ipv6": True,
         "external-controller": f"127.0.0.1:{controller_port}",
         "secret": controller_secret,
         "proxies": [
@@ -92,6 +92,7 @@ def build_mihomo_config(
                 "type": "trojan",
                 "server": binding.host,
                 "port": 443,
+                "ip-version": "ipv6-prefer",
                 "password": binding.token,
                 "sni": binding.host,
                 "skip-cert-verify": False,

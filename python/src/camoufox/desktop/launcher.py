@@ -42,6 +42,16 @@ def wait_for_browser_close(
             pass
 
 
+def navigate_start_page(page: Any, start_url: str) -> None:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        page.goto(start_url, wait_until="commit")
+    except PlaywrightTimeoutError:
+        # A slow or unavailable home page must not close an otherwise healthy browser.
+        pass
+
+
 def run_profile(
     store: ProfileStore,
     profile_id: str,
@@ -84,7 +94,7 @@ def run_profile(
         page = context.pages[0] if context.pages else context.new_page()
         start_url = str(profile.get("start_url") or "").strip()
         if start_url:
-            page.goto(start_url, wait_until="commit")
+            navigate_start_page(page, start_url)
         store.mark_opened(profile_id)
         on_started()
         wait_for_browser_close(context, network_health)

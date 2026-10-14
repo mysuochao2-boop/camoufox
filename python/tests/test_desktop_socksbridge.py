@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from camoufox.desktop.launcher import run_profile
+from camoufox.desktop.launcher import navigate_start_page, run_profile
 from camoufox.desktop.mihomo import MihomoBinding, build_mihomo_config
 from camoufox.desktop.profiles import (
     ProfileStore,
@@ -112,7 +112,7 @@ def test_mihomo_config_is_fixed_exit_and_fail_closed():
     )
 
     assert config["allow-lan"] is False
-    assert config["ipv6"] is False
+    assert config["ipv6"] is True
     assert config["listeners"] == [
         {
             "name": f"fp-{'a' * 16}",
@@ -125,10 +125,21 @@ def test_mihomo_config_is_fixed_exit_and_fail_closed():
         }
     ]
     assert config["proxies"][0]["password"] == "secret-token"
+    assert config["proxies"][0]["ip-version"] == "ipv6-prefer"
     assert config["proxies"][0]["ws-opts"]["path"] == "/trojan/proxy-002"
     assert config["proxies"][0]["udp"] is False
     assert config["rules"] == ["NETWORK,UDP,REJECT", "MATCH,REJECT"]
     assert "DIRECT" not in str(config)
+
+
+def test_start_page_timeout_does_not_stop_the_browser():
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    class Page:
+        def goto(self, url, **kwargs):
+            raise PlaywrightTimeoutError("startup page timed out")
+
+    navigate_start_page(Page(), "https://www.google.com/")
 
 
 def test_mihomo_binding_rejects_a_profile_path_injection():

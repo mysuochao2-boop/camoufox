@@ -24,6 +24,9 @@ browser process:
 Any failure before step 7 aborts the browser launch. If Mihomo exits while the
 browser is running, Desktop closes the browser context. The generated Mihomo
 rules reject UDP and unmatched traffic; they contain no `DIRECT` route.
+The SocksBridge gateway connection supports both IP families and prefers IPv6
+when the gateway domain has both records. This affects only how Mihomo reaches
+the selected upstream proxy; browser traffic still has no direct route.
 
 Each running environment currently owns one Mihomo process, controller and
 listener. This intentionally favors an independent failure domain over the
