@@ -43,13 +43,7 @@ from .socksbridge import (
     fetch_socksbridge_nodes,
     parse_subscription_url,
 )
-
-
-BLUE = "#3155f5"
-INK = "#1f2940"
-MUTED = "#7f8aa3"
-LINE = "#e8ebf2"
-BG = "#f6f7fb"
+from .theme import stylesheet
 
 
 class BrowserWorker(QThread):
@@ -871,44 +865,17 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-STYLE = f"""
-* {{ font-size: 13px; color: {INK}; }}
-QMainWindow, QWidget#page {{ background: {BG}; }}
-QFrame#sidebar {{ background: white; border-right: 1px solid {LINE}; }}
-QLabel#brand {{ font-size: 24px; font-weight: 700; padding: 2px 4px 20px 4px; color: #12182a; }}
-QLabel#heading {{ font-size: 25px; font-weight: 700; }}
-QLabel#dialogTitle {{ font-size: 20px; font-weight: 700; }}
-QLabel#muted, QLabel#sidebarFooter {{ color: {MUTED}; }}
-QLabel#sidebarFooter {{ line-height: 1.5; }}
-QLabel#hint {{ color: #68738c; background: #f4f6fb; border-radius: 8px; padding: 12px; }}
-QLabel#info {{ color: #3155b8; background: #edf2ff; border: 1px solid #d7e1ff; border-radius: 9px; padding: 13px; }}
-QPushButton {{ background: white; border: 1px solid #dfe3ec; border-radius: 7px; padding: 8px 13px; }}
-QPushButton:hover {{ border-color: #9eabca; background: #f8f9fd; }}
-QPushButton#primary, QPushButton#primarySmall, QPushButton#open {{ color: white; background: {BLUE}; border: none; font-weight: 600; }}
-QPushButton#primary {{ padding: 13px; font-size: 14px; }}
-QPushButton#primarySmall {{ padding: 10px 18px; }}
-QPushButton#open:disabled {{ background: #8fa1ef; }}
-QPushButton#nav {{ text-align: left; border: none; padding: 12px 14px; font-weight: 600; }}
-QPushButton#nav:checked {{ color: {BLUE}; background: #eaf0ff; }}
-QFrame#card, QTableWidget {{ background: white; border: 1px solid {LINE}; border-radius: 9px; }}
-QTableWidget {{ gridline-color: {LINE}; selection-background-color: #edf2ff; }}
-QHeaderView::section {{ background: #fafbfe; color: #8b94a9; border: none; border-bottom: 1px solid {LINE}; padding: 11px; font-weight: 600; }}
-QLineEdit, QComboBox, QSpinBox {{ background: white; border: 1px solid #dfe3ec; border-radius: 7px; padding: 8px 10px; min-height: 18px; }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {BLUE}; }}
-QTabWidget::pane {{ border: 1px solid {LINE}; background: white; border-radius: 8px; }}
-QTabBar::tab {{ padding: 10px 18px; color: {MUTED}; }}
-QTabBar::tab:selected {{ color: {BLUE}; font-weight: 600; }}
-QMenu {{ background: white; border: 1px solid {LINE}; padding: 6px; }}
-QMenu::item {{ padding: 8px 30px 8px 14px; border-radius: 5px; }}
-QMenu::item:selected {{ background: #edf2ff; }}
-"""
-
-
 def main() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Camoufox Desktop")
     app.setStyle("Fusion")
-    app.setStyleSheet(STYLE)
+    style_hints = app.styleHints()
+
+    def apply_theme(color_scheme: Qt.ColorScheme) -> None:
+        app.setStyleSheet(stylesheet(dark=color_scheme == Qt.ColorScheme.Dark))
+
+    apply_theme(style_hints.colorScheme())
+    style_hints.colorSchemeChanged.connect(apply_theme)
     font = QFont()
     font.setPointSize(13)
     app.setFont(font)
