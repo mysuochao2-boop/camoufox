@@ -368,18 +368,36 @@ index a9f68b0563..d3dede3ae0 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
-index 3e18b99ada..1007f8eb9b 100644
+index 3e18b99ada..7b284e84d5 100644
 --- a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
 +++ b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
-@@ -300,13 +300,21 @@ impl FontContext {
+@@ -4,6 +4,7 @@
+ 
+ use api::{ColorF, ColorU, FontKey, FontRenderMode, FontSize, GlyphDimensions};
+ use api::{FontInstanceFlags, FontTemplate, FontVariation, NativeFontHandle};
++use core_foundation::array::CFArray;
+ use core_foundation::data::CFData;
+ use core_foundation::base::TCFType;
+ use core_foundation::dictionary::CFDictionary;
+@@ -300,13 +301,31 @@ impl FontContext {
                  }
              };
              core_text::font::new_from_CGFont(&cg_font, 0.).copy_descriptor()
 +        } else if native_font_handle.path.len() > 0 {
 +            let cf_path = CFString::new(&native_font_handle.path);
 +            let font_url = CFURL::from_file_system_path(cf_path, kCFURLPOSIXPathStyle, false);
-+            font_manager::create_font_descriptors_from_url(&font_url)
-+                .expect("could not read font descriptors from file URL")
++            let descriptors_ref = unsafe {
++                font_manager::CTFontManagerCreateFontDescriptorsFromURL(
++                    font_url.as_concrete_TypeRef(),
++                )
++            };
++            assert!(
++                !descriptors_ref.is_null(),
++                "could not read font descriptors from file URL"
++            );
++            let descriptors: CFArray<CTFontDescriptor> =
++                unsafe { CFArray::wrap_under_create_rule(descriptors_ref) };
++            descriptors
 +                .iter()
 +                .find(|desc| desc.font_name() == native_font_handle.name)
 +                .map(|desc| (*desc).clone())
@@ -407,36 +425,3 @@ index 4b89cbf319..57690f6e1b 100644
 +
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
-diff --git a/third_party/rust/core-text/src/font_manager.rs b/third_party/rust/core-text/src/font_manager.rs
-index dff0f8d0fb..872937ee63 100644
---- a/third_party/rust/core-text/src/font_manager.rs
-+++ b/third_party/rust/core-text/src/font_manager.rs
-@@ -12,7 +12,7 @@ use core_foundation::array::{CFArray, CFArrayRef};
- use core_foundation::base::TCFType;
- use core_foundation::data::{CFData, CFDataRef};
- use core_foundation::string::CFString;
--use core_foundation::url::CFURLRef;
-+use core_foundation::url::{CFURL, CFURLRef};
- 
- pub fn copy_available_font_family_names() -> CFArray<CFString> {
-     unsafe { TCFType::wrap_under_create_rule(CTFontManagerCopyAvailableFontFamilyNames()) }
-@@ -45,6 +45,19 @@ pub fn create_font_descriptor_with_data(data: CFData) -> Result<CTFontDescriptor
-     }
- }
- 
-+pub fn create_font_descriptors_from_url(
-+    file_url: &CFURL,
-+) -> Result<CFArray<CTFontDescriptor>, ()> {
-+    unsafe {
-+        let descriptors =
-+            CTFontManagerCreateFontDescriptorsFromURL(file_url.as_concrete_TypeRef());
-+        if descriptors.is_null() {
-+            return Err(());
-+        }
-+        Ok(CFArray::wrap_under_create_rule(descriptors))
-+    }
-+}
-+
- extern "C" {
-     /*
-      * CTFontManager.h

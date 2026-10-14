@@ -581,14 +581,17 @@ def test_macos_webrender_uses_exact_cross_os_font_descriptor():
     patch = (BROWSER / "patches" / "font-hijacker.patch").read_text(encoding="utf-8")
     required = (
         "diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs",
-        "diff --git a/third_party/rust/core-text/src/font_manager.rs",
-        "create_font_descriptors_from_url",
+        "CFArray<CTFontDescriptor>",
         "CTFontManagerCreateFontDescriptorsFromURL",
         ".find(|desc| desc.font_name() == native_font_handle.name)",
         'expect("font file did not contain its selected PostScript face")',
     )
     missing = [snippet for snippet in required if snippet not in patch]
-    assert not missing and "diff --git a/gfx/2d/ScaledFontMac.cpp" not in patch, (
+    forbidden = (
+        "diff --git a/gfx/2d/ScaledFontMac.cpp",
+        "diff --git a/third_party/rust/core-text",
+    )
+    assert not missing and not any(snippet in patch for snippet in forbidden), (
         f"the macOS exact bundled-font descriptor path was lost: {missing}"
         + explain("macos-webrender-uses-exact-bundled-font-data")
     )
