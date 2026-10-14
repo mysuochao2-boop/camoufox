@@ -72,6 +72,37 @@ def test_launch_kwargs_use_stable_profile_and_proxy(tmp_path: Path):
     assert kwargs["geoip"] is True
 
 
+def test_launch_kwargs_use_custom_executable(tmp_path: Path):
+    executable = tmp_path / "camoufox"
+    executable.touch()
+    profile = new_profile(name="Local build", target_os="windows")
+    profile["executable_path"] = str(executable)
+
+    kwargs = launch_kwargs(profile, tmp_path / "profile")
+
+    assert kwargs["executable_path"] == str(executable)
+    assert "browser" not in kwargs
+
+
+def test_browser_version_and_custom_executable_are_exclusive(tmp_path: Path):
+    executable = tmp_path / "camoufox"
+    executable.touch()
+    profile = new_profile(name="Conflicting browser")
+    profile["browser"] = "152.0.4-beta.31"
+    profile["executable_path"] = str(executable)
+
+    with pytest.raises(ValueError, match="cannot be used together"):
+        launch_kwargs(profile, tmp_path / "profile")
+
+
+def test_custom_executable_must_be_a_file(tmp_path: Path):
+    profile = new_profile(name="Missing local build")
+    profile["executable_path"] = str(tmp_path / "missing-camoufox")
+
+    with pytest.raises(ValueError, match="does not exist"):
+        launch_kwargs(profile, tmp_path / "profile")
+
+
 def test_proxy_requires_host_and_port_together(tmp_path: Path):
     profile = new_profile(name="Partial")
     profile["proxy"] = {"type": "http", "host": "proxy.test", "port": None}
@@ -162,3 +193,19 @@ def test_selected_browser_uses_version_specific_profile_directory(tmp_path: Path
 
     assert selected_directory != legacy_directory
     assert selected_directory == legacy_directory / "browsers" / "152.0.4-beta.31"
+
+
+def test_custom_executable_uses_stable_separate_profile_directory(tmp_path: Path):
+    store = ProfileStore(tmp_path)
+    executable = tmp_path / "build" / "camoufox"
+    executable.parent.mkdir()
+    executable.touch()
+    profile = new_profile(name="Local build", target_os="windows")
+    profile["executable_path"] = str(executable)
+
+    first = store.runtime_profile_dir(profile)
+    second = store.runtime_profile_dir(profile)
+
+    assert first == second
+    assert first.parent == store.profile_dir(profile["id"]) / "browsers"
+    assert first.name.startswith("local-")

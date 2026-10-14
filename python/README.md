@@ -35,10 +35,11 @@ camoufox desktop
 The desktop app creates isolated, persistent browser environments with a stable
 device fingerprint, separate cookies and storage, optional HTTP/HTTPS/SOCKS
 proxy credentials, and GeoIP alignment for timezone, locale, geolocation and
-WebRTC IP. Each environment can also select any locally installed Camoufox
-version, which is useful when a site or platform needs a specific build. Browser
-versions use separate profile directories so switching versions cannot downgrade
-and corrupt another version's cookies, history or browser databases.
+WebRTC IP. Each environment can select an installed Camoufox version or a local
+Camoufox executable, which is useful when a site or platform needs a specific or
+development build. Each selection uses a separate profile directory so switching
+builds cannot downgrade and corrupt another build's cookies, history or browser
+databases.
 Environment data stays in the current user's application-data
 directory. The environment row menu can clear rebuildable browser caches
 without removing cookies, login state, history or local storage.

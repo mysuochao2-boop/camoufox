@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -135,6 +137,19 @@ class ProfileDialog(QDialog):
             version = installed.version.full_string
             label = f"{version}（当前）" if installed.is_active else version
             self.browser.addItem(label, version)
+        self.executable_path = QLineEdit()
+        self.executable_path.setPlaceholderText("选择本地 Camoufox 可执行文件")
+        self.executable_path.setClearButtonEnabled(True)
+        self.executable_path.textChanged.connect(
+            lambda value: self.browser.setEnabled(not value.strip())
+        )
+        choose_executable = QPushButton("选择…")
+        choose_executable.clicked.connect(self._choose_executable)
+        executable = QWidget()
+        executable_layout = QHBoxLayout(executable)
+        executable_layout.setContentsMargins(0, 0, 0, 0)
+        executable_layout.addWidget(self.executable_path, 1)
+        executable_layout.addWidget(choose_executable)
         self.locale = QComboBox()
         self.locale.setEditable(True)
         self.locale.addItems(["", "zh-CN", "en-US", "en-GB", "ja-JP", "de-DE", "fr-FR"])
@@ -151,6 +166,7 @@ class ProfileDialog(QDialog):
         size_layout.addWidget(QLabel("×"))
         size_layout.addWidget(self.height)
         form.addRow("浏览器版本", self.browser)
+        form.addRow("本地浏览器", executable)
         form.addRow("设备系统", self.target_os)
         form.addRow("语言地区", self.locale)
         form.addRow("窗口尺寸", size)
@@ -209,6 +225,7 @@ class ProfileDialog(QDialog):
             self.browser.addItem(f"{browser}（未安装）", browser)
             browser_index = self.browser.count() - 1
         self.browser.setCurrentIndex(max(browser_index, 0))
+        self.executable_path.setText(str(profile.get("executable_path") or ""))
         self.locale.setCurrentText(str(profile.get("locale") or ""))
         screen = profile.get("screen") or {}
         self.width.setValue(int(screen.get("width") or 0))
@@ -221,6 +238,22 @@ class ProfileDialog(QDialog):
         self.proxy_password.setText(str(proxy.get("password") or ""))
         self.geoip.setChecked(bool(profile.get("geoip", True)))
 
+    def _choose_executable(self) -> None:
+        current = self.executable_path.text().strip()
+        start = current if current else str(Path.home())
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Camoufox 浏览器",
+            start,
+            "Camoufox (camoufox camoufox.exe);;所有文件 (*)",
+        )
+        if not selected:
+            return
+        path = Path(selected)
+        if path.suffix.lower() == ".app":
+            path = path / "Contents" / "MacOS" / "camoufox"
+        self.executable_path.setText(str(path))
+
     def _accept(self) -> None:
         screen = {"width": self.width.value() or None, "height": self.height.value() or None}
         target_os = str(self.target_os.currentData())
@@ -230,6 +263,7 @@ class ProfileDialog(QDialog):
             self.profile.get("screen"),
         )
         current_identity = (target_os, self.locale.currentText().strip(), screen)
+        executable_path = self.executable_path.text().strip()
         self.profile.update(
             {
                 "name": self.name.text().strip(),
@@ -237,7 +271,8 @@ class ProfileDialog(QDialog):
                 "start_url": self.start_url.text().strip(),
                 "target_os": target_os,
                 "locale": self.locale.currentText().strip(),
-                "browser": str(self.browser.currentData() or ""),
+                "browser": "" if executable_path else str(self.browser.currentData() or ""),
+                "executable_path": executable_path,
                 "screen": screen,
                 "proxy": {
                     "type": self.proxy_type.currentText(),
@@ -450,7 +485,10 @@ class MainWindow(QMainWindow):
                 profile.get("target_os"), "自动"
             )
             locale = profile.get("locale") or "自动"
-            browser = profile.get("browser") or "当前版本"
+            executable_path = profile.get("executable_path") or ""
+            browser = Path(executable_path).name if executable_path else (
+                profile.get("browser") or "当前版本"
+            )
             self.table.setItem(
                 row,
                 3,

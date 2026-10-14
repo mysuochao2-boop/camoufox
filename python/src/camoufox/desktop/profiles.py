@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,7 @@ def new_profile(
         "target_os": target_os,
         "locale": locale.strip(),
         "browser": "",
+        "executable_path": "",
         "start_url": "https://www.google.com/",
         "screen": {"width": None, "height": None},
         "proxy": {
@@ -72,6 +74,14 @@ def validate_profile(profile: Dict[str, Any]) -> None:
         raise ValueError("Browser version must be a string")
     if browser and not BROWSER_VERSION_PATTERN.fullmatch(browser):
         raise ValueError("Invalid browser version")
+    executable_path = profile.get("executable_path", "")
+    if not isinstance(executable_path, str):
+        raise ValueError("Browser executable path must be a string")
+    executable_path = executable_path.strip()
+    if browser and executable_path:
+        raise ValueError("Browser version and executable path cannot be used together")
+    if executable_path and not Path(executable_path).is_file():
+        raise ValueError(f"Browser executable does not exist: {executable_path}")
 
     proxy = profile.get("proxy") or {}
     host = str(proxy.get("host") or "").strip()
@@ -129,7 +139,9 @@ def launch_kwargs(profile: Dict[str, Any], profile_dir: Path) -> Dict[str, Any]:
         result["locale"] = profile["locale"]
     if profile.get("fingerprint_preset"):
         result["fingerprint_preset"] = profile["fingerprint_preset"]
-    if profile.get("browser"):
+    if profile.get("executable_path"):
+        result["executable_path"] = profile["executable_path"].strip()
+    elif profile.get("browser"):
         result["browser"] = profile["browser"]
 
     screen = profile.get("screen") or {}
@@ -240,6 +252,12 @@ class ProfileStore:
     def runtime_profile_dir(self, profile: Dict[str, Any]) -> Path:
         validate_profile(profile)
         directory = self.profile_dir(profile["id"])
+        executable_path = str(profile.get("executable_path") or "").strip()
+        if executable_path:
+            identity = hashlib.sha256(
+                str(Path(executable_path).resolve()).encode("utf-8")
+            ).hexdigest()[:16]
+            return directory / "browsers" / f"local-{identity}"
         browser = profile.get("browser") or ""
         return directory / "browsers" / browser if browser else directory
 
