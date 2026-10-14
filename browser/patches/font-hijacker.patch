@@ -368,7 +368,7 @@ index a9f68b0563..d3dede3ae0 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
-index 3e18b99ada..7b284e84d5 100644
+index 3e18b99ada..75972b16f1 100644
 --- a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
 +++ b/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs
 @@ -4,6 +4,7 @@
@@ -379,11 +379,28 @@ index 3e18b99ada..7b284e84d5 100644
  use core_foundation::data::CFData;
  use core_foundation::base::TCFType;
  use core_foundation::dictionary::CFDictionary;
-@@ -300,13 +301,31 @@ impl FontContext {
-                 }
-             };
-             core_text::font::new_from_CGFont(&cg_font, 0.).copy_descriptor()
-+        } else if native_font_handle.path.len() > 0 {
+@@ -20,7 +21,7 @@ use core_graphics::geometry::{CGAffineTransform, CGPoint, CGSize};
+ use core_graphics::geometry::{CG_AFFINE_TRANSFORM_IDENTITY, CGRect};
+ use core_text::font::CTFont;
+ use core_text::font_descriptor::{CTFontDescriptor, kCTFontDefaultOrientation};
+-use core_text::font_descriptor::{kCTFontURLAttribute, kCTFontVariationAttribute};
++use core_text::font_descriptor::kCTFontVariationAttribute;
+ use core_text::font_manager;
+ use euclid::default::Size2D;
+ use crate::gamma_lut::{ColorLut, GammaLut};
+@@ -281,12 +282,28 @@ impl FontContext {
+         // because that adds the CGFont to the descriptor cache which can keep the CGFont
+         // around for a long time, but that should be ok for non-web (native) fonts.
+         let cf_name = CFString::new(&native_font_handle.name);
+-
+-        // For "hidden" system fonts, whose names start with a period,
+-        // we can't instantiate CTFonts via a descriptor. We're really
+-        // supposed to use CTFontCreateUIFontForLanguage, but for now
+-        // we just use the CGFont.
+-        let mut desc = if native_font_handle.name.starts_with('.') {
++        // A hidden system font without a source path cannot be instantiated
++        // from a name descriptor, so retain the CGFont path for that case.
++        let desc = if native_font_handle.path.len() > 0 {
 +            let cf_path = CFString::new(&native_font_handle.path);
 +            let font_url = CFURL::from_file_system_path(cf_path, kCFURLPOSIXPathStyle, false);
 +            let descriptors_ref = unsafe {
@@ -402,18 +419,30 @@ index 3e18b99ada..7b284e84d5 100644
 +                .find(|desc| desc.font_name() == native_font_handle.name)
 +                .map(|desc| (*desc).clone())
 +                .expect("font file did not contain its selected PostScript face")
-         } else {
++        } else if native_font_handle.name.starts_with('.') {
+             let cg_font = match CGFont::from_name(&cf_name) {
+                 Ok(cg_font) => cg_font,
+                 Err(_) => {
+@@ -304,19 +321,6 @@ impl FontContext {
              core_text::font_descriptor::new_from_postscript_name(&cf_name)
          };
  
 -        // If the NativeFontHandle includes a file path, add this to the descriptor
 -        // to disambiguate cases where multiple installed fonts have the same psname.
 -        if native_font_handle.path.len() > 0 {
-+        // Hidden system fonts still need the CGFont-based descriptor path above.
-+        if native_font_handle.name.starts_with('.') && native_font_handle.path.len() > 0 {
-             let cf_path = CFString::new(&native_font_handle.path);
-             let url_attribute = unsafe { CFString::wrap_under_get_rule(kCTFontURLAttribute) };
-             let attrs = CFDictionary::from_CFType_pairs(&[
+-            let cf_path = CFString::new(&native_font_handle.path);
+-            let url_attribute = unsafe { CFString::wrap_under_get_rule(kCTFontURLAttribute) };
+-            let attrs = CFDictionary::from_CFType_pairs(&[
+-                (url_attribute, CFURL::from_file_system_path(cf_path, kCFURLPOSIXPathStyle, false)),
+-            ]);
+-            if let Ok(desc_with_path) = desc.create_copy_with_attributes(attrs.to_untyped()) {
+-                desc = desc_with_path;
+-            }
+-        }
+-
+         self.ct_font_descs
+             .insert(*font_key, desc);
+     }
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 index 4b89cbf319..57690f6e1b 100644
 --- a/layout/style/moz.build

@@ -583,6 +583,8 @@ def test_macos_webrender_uses_exact_cross_os_font_descriptor():
         "diff --git a/gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs",
         "CFArray<CTFontDescriptor>",
         "CTFontManagerCreateFontDescriptorsFromURL",
+        "+        let desc = if native_font_handle.path.len() > 0 {",
+        "+        } else if native_font_handle.name.starts_with('.') {",
         ".find(|desc| desc.font_name() == native_font_handle.name)",
         'expect("font file did not contain its selected PostScript face")',
     )

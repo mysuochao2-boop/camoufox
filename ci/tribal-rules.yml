@@ -169,6 +169,8 @@ rules:
       - "A beta.32 build registering the same bundle in the parent and GPU processes still painted unrelated glyphs for a Windows identity"
       - "A beta.32 build sending selected CGFont table data avoided name lookup but blocked startup on the 2 GB cross-OS font bundle"
       - "A beta.32 build creating one CoreText descriptor with both name and URL still painted different glyphs on screen than Playwright captured"
+      - "Build 76457b9 on macOS 15.4.1: URL-enumerated bundled faces fixed page text, but the tab title still painted Windows as unrelated glyphs because .SFNS hidden fonts took the name-first branch"
+      - "macOS 15.4.1: CTFontManagerCreateFontDescriptorsFromURL enumerated all 369 faces in /System/Library/Fonts/SFNS.ttf and instantiated .SFNS-Regular from its exact descriptor"
     rationale: >-
       The parent process shapes browser chrome, while WebRender rasterizes its
       glyph IDs in the GPU process. The cross-OS bundle contains collections and
@@ -177,8 +179,11 @@ rules:
       glyphs. WebRender must enumerate the faces directly from the source URL
       and choose the descriptor whose PostScript name is the selected face;
       constructing or augmenting a name-based descriptor still consults the
-      conflicting global cache. Sending raw font tables is not acceptable
-      because large CJK collections block browser startup.
+      conflicting global cache. A source path takes precedence even for hidden
+      system faces such as .SFNS, because the GPU process's name cache may point
+      at the bundled copy while the parent shaped with the host copy. Sending raw
+      font tables is not acceptable because large CJK collections block browser
+      startup.
 
   # -------------------------------------------------------------------------
   # Measurement
