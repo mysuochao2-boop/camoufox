@@ -136,7 +136,7 @@ def test_manual_window_close_stops_desktop_worker():
 
         def wait_for_event(self, event, timeout):
             assert event == "close"
-            assert timeout == 0
+            assert timeout == 250
             self.closed = True
             self.context.pages.remove(self)
 
@@ -146,6 +146,34 @@ def test_manual_window_close_stops_desktop_worker():
     wait_for_browser_close(context)
 
     assert context.pages == []
+
+
+def test_mihomo_exit_closes_browser_fail_closed():
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    class Page:
+        def is_closed(self):
+            return False
+
+        def wait_for_event(self, event, timeout):
+            assert event == "close"
+            assert timeout == 250
+            raise PlaywrightTimeoutError("still open")
+
+    class Context:
+        pages = [Page()]
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    health = iter((True, False))
+    context = Context()
+
+    with pytest.raises(RuntimeError, match="Mihomo stopped"):
+        wait_for_browser_close(context, lambda: next(health))
+
+    assert context.closed is True
 
 
 def test_missing_fingerprint_uses_target_os_preset(monkeypatch):

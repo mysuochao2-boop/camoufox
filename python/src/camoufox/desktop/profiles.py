@@ -19,6 +19,8 @@ SCHEMA_VERSION = 1
 TARGET_OSES = {"", "windows", "macos", "linux"}
 PROXY_TYPES = {"http", "https", "socks4", "socks5"}
 BROWSER_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+SOCKSBRIDGE_NODE_PATTERN = re.compile(r"^proxy-[0-9]{3,}$")
+SOCKSBRIDGE_HOST = "proxy.51proxy.org"
 
 
 def _now() -> str:
@@ -54,6 +56,13 @@ def new_profile(
             "username": "",
             "password": "",
         },
+        "socksbridge": {
+            "enabled": False,
+            "host": "",
+            "node_id": "",
+            "node_label": "",
+            "credential_ref": "",
+        },
         "geoip": True,
         "fingerprint_preset": None,
         "created_at": now,
@@ -83,11 +92,30 @@ def validate_profile(profile: Dict[str, Any]) -> None:
     if executable_path and not Path(executable_path).is_file():
         raise ValueError(f"Browser executable does not exist: {executable_path}")
 
+    socksbridge = profile.get("socksbridge") or {}
+    if not isinstance(socksbridge, dict):
+        raise ValueError("SocksBridge settings must be an object")
+    forbidden_secrets = {"token", "password", "subscription_url"} & socksbridge.keys()
+    if forbidden_secrets:
+        raise ValueError("SocksBridge secrets must be kept in the credential store")
+    if socksbridge.get("enabled"):
+        if socksbridge.get("host") != SOCKSBRIDGE_HOST:
+            raise ValueError("Unsupported SocksBridge host")
+        if not SOCKSBRIDGE_NODE_PATTERN.fullmatch(
+            str(socksbridge.get("node_id") or "")
+        ):
+            raise ValueError("A fixed SocksBridge proxy node is required")
+        expected_reference = f"profile/{profile['id']}"
+        if socksbridge.get("credential_ref") != expected_reference:
+            raise ValueError("Invalid SocksBridge credential reference")
+
     proxy = profile.get("proxy") or {}
     host = str(proxy.get("host") or "").strip()
     port = proxy.get("port")
     if bool(host) != (port not in (None, "")):
         raise ValueError("Proxy host and port must be provided together")
+    if socksbridge.get("enabled") and host:
+        raise ValueError("Manual proxy and SocksBridge cannot be used together")
     if host:
         if proxy.get("type", "http") not in PROXY_TYPES:
             raise ValueError("Unsupported proxy type")
@@ -143,6 +171,19 @@ def launch_kwargs(profile: Dict[str, Any], profile_dir: Path) -> Dict[str, Any]:
         result["executable_path"] = profile["executable_path"].strip()
     elif profile.get("browser"):
         result["browser"] = profile["browser"]
+
+    if (profile.get("socksbridge") or {}).get("enabled"):
+        result["block_webrtc"] = True
+        result["firefox_user_prefs"] = {
+            "network.proxy.failover_direct": False,
+            "network.proxy.no_proxies_on": "",
+            "network.proxy.allow_hijacking_localhost": True,
+            "network.http.http3.enable": False,
+            "network.trr.mode": 5,
+            "network.dns.disablePrefetch": True,
+            "network.dns.disablePrefetchFromHTTPS": True,
+            "network.http.speculative-parallel-limit": 0,
+        }
 
     screen = profile.get("screen") or {}
     if screen.get("width") and screen.get("height"):
@@ -219,6 +260,10 @@ class ProfileStore:
     def duplicate(self, profile_id: str) -> Dict[str, Any]:
         profile = self.get(profile_id)
         profile["id"] = uuid.uuid4().hex
+        socksbridge = profile.get("socksbridge") or {}
+        if socksbridge.get("enabled"):
+            socksbridge["credential_ref"] = f"profile/{profile['id']}"
+            profile["socksbridge"] = socksbridge
         profile["name"] = f"{profile['name']} copy"
         profile["fingerprint_preset"] = None
         profile["created_at"] = _now()

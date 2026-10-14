@@ -38,6 +38,11 @@ from camoufox.multiversion import list_installed
 
 from .launcher import run_profile
 from .profiles import ProfileStore, new_profile, validate_profile
+from .socksbridge import (
+    SocksBridgeCredentialStore,
+    fetch_socksbridge_nodes,
+    parse_subscription_url,
+)
 
 
 BLUE = "#3155f5"
@@ -68,11 +73,18 @@ class BrowserWorker(QThread):
 
 
 class ProfileDialog(QDialog):
-    def __init__(self, profile: Optional[Dict[str, Any]] = None, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        profile: Optional[Dict[str, Any]] = None,
+        parent: Optional[QWidget] = None,
+        credential_store: Optional[SocksBridgeCredentialStore] = None,
+    ):
         super().__init__(parent)
         self.profile = dict(profile) if profile else new_profile(name="")
+        self.credential_store = credential_store or SocksBridgeCredentialStore()
+        self._pending_socksbridge: Optional[tuple[str, str]] = None
         self.setWindowTitle("编辑环境" if profile else "新建环境")
-        self.setMinimumSize(620, 570)
+        self.setMinimumSize(680, 650)
 
         root = QVBoxLayout(self)
         title = QLabel("编辑浏览器环境" if profile else "创建新的浏览器环境")
@@ -184,6 +196,10 @@ class ProfileDialog(QDialog):
         form = QFormLayout(page)
         form.setContentsMargins(24, 24, 24, 24)
         form.setSpacing(16)
+        self.proxy_source = QComboBox()
+        self.proxy_source.addItem("手动 HTTP / SOCKS 代理", "manual")
+        self.proxy_source.addItem("SocksBridge 固定线路（Mihomo）", "socksbridge")
+        self.proxy_source.currentIndexChanged.connect(self._proxy_source_changed)
         self.proxy_type = QComboBox()
         self.proxy_type.addItems(["http", "https", "socks5", "socks4"])
         self.proxy_host = QLineEdit()
@@ -194,18 +210,36 @@ class ProfileDialog(QDialog):
         self.proxy_user = QLineEdit()
         self.proxy_password = QLineEdit()
         self.proxy_password.setEchoMode(QLineEdit.Password)
+        self.socksbridge_subscription = QLineEdit()
+        self.socksbridge_subscription.setEchoMode(QLineEdit.Password)
+        self.socksbridge_subscription.setPlaceholderText(
+            "https://proxy.51proxy.org/sub/USER_TOKEN"
+        )
+        self.load_socksbridge_nodes = QPushButton("读取线路")
+        self.load_socksbridge_nodes.clicked.connect(self._load_socksbridge_nodes)
+        subscription = QWidget()
+        subscription_layout = QHBoxLayout(subscription)
+        subscription_layout.setContentsMargins(0, 0, 0, 0)
+        subscription_layout.addWidget(self.socksbridge_subscription, 1)
+        subscription_layout.addWidget(self.load_socksbridge_nodes)
+        self.socksbridge_node = QComboBox()
+        self.socksbridge_node.setPlaceholderText("先读取订阅线路")
         self.geoip = QCheckBox(
             "根据代理出口 IP 自动匹配时区、语言、定位与 WebRTC IP"
         )
         self.geoip.setChecked(True)
+        form.addRow("代理来源", self.proxy_source)
         form.addRow("代理协议", self.proxy_type)
         form.addRow("主机", self.proxy_host)
         form.addRow("端口", self.proxy_port)
         form.addRow("用户名", self.proxy_user)
         form.addRow("密码", self.proxy_password)
+        form.addRow("SocksBridge 订阅", subscription)
+        form.addRow("固定出口线路", self.socksbridge_node)
         form.addRow("", self.geoip)
         note = QLabel(
-            "代理凭据仅保存在当前电脑的应用数据目录，文件权限限制为当前用户。"
+            "SocksBridge 仅允许固定 proxy-NNN 线路。Token 保存在系统钥匙串；"
+            "Mihomo 未就绪或退出时浏览器不会直连。"
         )
         note.setWordWrap(True)
         note.setObjectName("hint")
@@ -231,12 +265,63 @@ class ProfileDialog(QDialog):
         self.width.setValue(int(screen.get("width") or 0))
         self.height.setValue(int(screen.get("height") or 0))
         proxy = profile.get("proxy") or {}
+        socksbridge = profile.get("socksbridge") or {}
+        source = "socksbridge" if socksbridge.get("enabled") else "manual"
+        self.proxy_source.setCurrentIndex(max(self.proxy_source.findData(source), 0))
         self.proxy_type.setCurrentText(str(proxy.get("type") or "http"))
         self.proxy_host.setText(str(proxy.get("host") or ""))
         self.proxy_port.setValue(int(proxy.get("port") or 0))
         self.proxy_user.setText(str(proxy.get("username") or ""))
         self.proxy_password.setText(str(proxy.get("password") or ""))
+        node_id = str(socksbridge.get("node_id") or "")
+        if node_id:
+            self.socksbridge_node.addItem(
+                str(socksbridge.get("node_label") or node_id),
+                node_id,
+            )
         self.geoip.setChecked(bool(profile.get("geoip", True)))
+        self._proxy_source_changed()
+
+    def _proxy_source_changed(self) -> None:
+        socksbridge = self.proxy_source.currentData() == "socksbridge"
+        for widget in (
+            self.proxy_type,
+            self.proxy_host,
+            self.proxy_port,
+            self.proxy_user,
+            self.proxy_password,
+        ):
+            widget.setEnabled(not socksbridge)
+        self.socksbridge_subscription.setEnabled(socksbridge)
+        self.socksbridge_node.setEnabled(socksbridge)
+        self.load_socksbridge_nodes.setEnabled(socksbridge)
+
+    def _load_socksbridge_nodes(self) -> None:
+        try:
+            value = self.socksbridge_subscription.text().strip()
+            if value:
+                host, token = parse_subscription_url(value)
+            else:
+                socksbridge = self.profile.get("socksbridge") or {}
+                host = str(socksbridge.get("host") or "")
+                reference = str(socksbridge.get("credential_ref") or "")
+                token = self.credential_store.get(reference)
+            nodes = fetch_socksbridge_nodes(host, token)
+        except Exception as error:
+            QMessageBox.warning(self, "无法读取线路", str(error))
+            return
+        selected = self.socksbridge_node.currentData()
+        self.socksbridge_node.clear()
+        for node in nodes:
+            self.socksbridge_node.addItem(node.label, node.id)
+        index = self.socksbridge_node.findData(selected)
+        if index >= 0:
+            self.socksbridge_node.setCurrentIndex(index)
+        self._pending_socksbridge = (host, token)
+        self.socksbridge_subscription.clear()
+        self.socksbridge_subscription.setPlaceholderText(
+            "订阅凭据已读取并等待安全保存"
+        )
 
     def _choose_executable(self) -> None:
         current = self.executable_path.text().strip()
@@ -264,6 +349,31 @@ class ProfileDialog(QDialog):
         )
         current_identity = (target_os, self.locale.currentText().strip(), screen)
         executable_path = self.executable_path.text().strip()
+        use_socksbridge = self.proxy_source.currentData() == "socksbridge"
+        credential_reference = f"profile/{self.profile['id']}"
+        existing_socksbridge = self.profile.get("socksbridge") or {}
+        if use_socksbridge:
+            node_id = str(self.socksbridge_node.currentData() or "")
+            host = (
+                self._pending_socksbridge[0]
+                if self._pending_socksbridge
+                else str(existing_socksbridge.get("host") or "")
+            )
+            socksbridge = {
+                "enabled": True,
+                "host": host,
+                "node_id": node_id,
+                "node_label": self.socksbridge_node.currentText().strip(),
+                "credential_ref": credential_reference,
+            }
+        else:
+            socksbridge = {
+                "enabled": False,
+                "host": "",
+                "node_id": "",
+                "node_label": "",
+                "credential_ref": "",
+            }
         self.profile.update(
             {
                 "name": self.name.text().strip(),
@@ -276,11 +386,16 @@ class ProfileDialog(QDialog):
                 "screen": screen,
                 "proxy": {
                     "type": self.proxy_type.currentText(),
-                    "host": self.proxy_host.text().strip(),
-                    "port": self.proxy_port.value() or None,
-                    "username": self.proxy_user.text(),
-                    "password": self.proxy_password.text(),
+                    "host": (
+                        "" if use_socksbridge else self.proxy_host.text().strip()
+                    ),
+                    "port": (
+                        None if use_socksbridge else self.proxy_port.value() or None
+                    ),
+                    "username": "" if use_socksbridge else self.proxy_user.text(),
+                    "password": "" if use_socksbridge else self.proxy_password.text(),
                 },
+                "socksbridge": socksbridge,
                 "geoip": self.geoip.isChecked(),
             }
         )
@@ -291,6 +406,20 @@ class ProfileDialog(QDialog):
         except ValueError as error:
             QMessageBox.warning(self, "无法保存", str(error))
             return
+        try:
+            if use_socksbridge:
+                if self._pending_socksbridge:
+                    self.credential_store.set(
+                        credential_reference,
+                        self._pending_socksbridge[1],
+                    )
+                else:
+                    self.credential_store.get(credential_reference)
+            elif existing_socksbridge.get("credential_ref"):
+                self.credential_store.delete(existing_socksbridge["credential_ref"])
+        except (RuntimeError, ValueError) as error:
+            QMessageBox.warning(self, "无法保存凭据", str(error))
+            return
         self.accept()
 
 
@@ -298,6 +427,7 @@ class MainWindow(QMainWindow):
     def __init__(self, store: Optional[ProfileStore] = None):
         super().__init__()
         self.store = store or ProfileStore()
+        self.credentials = SocksBridgeCredentialStore()
         self.workers: Dict[str, BrowserWorker] = {}
         self.setWindowTitle("Camoufox Desktop")
         self.resize(1380, 820)
@@ -463,7 +593,12 @@ class MainWindow(QMainWindow):
         for profile in self.store.list():
             proxy = profile.get("proxy") or {}
             haystack = " ".join(
-                [profile.get("id", ""), profile.get("name", ""), proxy.get("host", "")]
+                [
+                    profile.get("id", ""),
+                    profile.get("name", ""),
+                    proxy.get("host", ""),
+                    (profile.get("socksbridge") or {}).get("node_label", ""),
+                ]
             ).lower()
             if group != "全部分组" and profile.get("group") != group:
                 continue
@@ -495,8 +630,12 @@ class MainWindow(QMainWindow):
                 QTableWidgetItem(f"{os_label} · {locale}\n{browser}"),
             )
             proxy = profile.get("proxy") or {}
+            socksbridge = profile.get("socksbridge") or {}
             proxy_text = "直连"
-            if proxy.get("host"):
+            if socksbridge.get("enabled"):
+                node = socksbridge.get("node_label") or socksbridge.get("node_id")
+                proxy_text = f"SocksBridge · {node}"
+            elif proxy.get("host"):
                 proxy_text = f"{proxy.get('type', 'http')}://{proxy['host']}:{proxy.get('port')}"
             self.table.setItem(row, 4, QTableWidgetItem(proxy_text))
             self.table.setItem(
@@ -512,16 +651,41 @@ class MainWindow(QMainWindow):
             profile
             for profile in self.store.list()
             if (profile.get("proxy") or {}).get("host")
+            or (profile.get("socksbridge") or {}).get("enabled")
         ]
         self.proxy_table.setRowCount(len(profiles))
         for row, profile in enumerate(profiles):
             proxy = profile["proxy"]
+            socksbridge = profile.get("socksbridge") or {}
             item = QTableWidgetItem(profile["name"])
             item.setData(Qt.UserRole, profile["id"])
             self.proxy_table.setItem(row, 0, item)
-            self.proxy_table.setItem(row, 1, QTableWidgetItem(proxy.get("type", "http").upper()))
-            self.proxy_table.setItem(row, 2, QTableWidgetItem(f"{proxy['host']}:{proxy['port']}"))
-            self.proxy_table.setItem(row, 3, QTableWidgetItem(proxy.get("username") or "—"))
+            if socksbridge.get("enabled"):
+                self.proxy_table.setItem(row, 1, QTableWidgetItem("MIHOMO"))
+                self.proxy_table.setItem(
+                    row,
+                    2,
+                    QTableWidgetItem(
+                        socksbridge.get("node_label") or socksbridge.get("node_id")
+                    ),
+                )
+                self.proxy_table.setItem(row, 3, QTableWidgetItem("系统钥匙串"))
+            else:
+                self.proxy_table.setItem(
+                    row,
+                    1,
+                    QTableWidgetItem(proxy.get("type", "http").upper()),
+                )
+                self.proxy_table.setItem(
+                    row,
+                    2,
+                    QTableWidgetItem(f"{proxy['host']}:{proxy['port']}"),
+                )
+                self.proxy_table.setItem(
+                    row,
+                    3,
+                    QTableWidgetItem(proxy.get("username") or "—"),
+                )
             self.proxy_table.setItem(
                 row,
                 4,
@@ -574,19 +738,45 @@ class MainWindow(QMainWindow):
         return item.data(Qt.UserRole) if item else None
 
     def create_profile(self) -> None:
-        dialog = ProfileDialog(parent=self)
+        dialog = ProfileDialog(parent=self, credential_store=self.credentials)
         if dialog.exec() == QDialog.Accepted:
             self.store.save(dialog.profile)
             self.refresh()
 
     def edit_profile(self, profile_id: str) -> None:
-        dialog = ProfileDialog(self.store.get(profile_id), self)
+        dialog = ProfileDialog(
+            self.store.get(profile_id),
+            self,
+            credential_store=self.credentials,
+        )
         if dialog.exec() == QDialog.Accepted:
             self.store.save(dialog.profile)
             self.refresh()
 
     def duplicate_profile(self, profile_id: str) -> None:
-        self.store.duplicate(profile_id)
+        try:
+            original = self.store.get(profile_id)
+            credential_reference = (original.get("socksbridge") or {}).get(
+                "credential_ref"
+            )
+            token = (
+                self.credentials.get(credential_reference)
+                if credential_reference
+                else None
+            )
+            duplicate = self.store.duplicate(profile_id)
+            if token:
+                try:
+                    self.credentials.set(
+                        duplicate["socksbridge"]["credential_ref"],
+                        token,
+                    )
+                except Exception:
+                    self.store.delete(duplicate["id"])
+                    raise
+        except (RuntimeError, ValueError) as error:
+            QMessageBox.warning(self, "无法复制环境", str(error))
+            return
         self.refresh()
 
     def delete_profile(self, profile_id: str) -> None:
@@ -607,6 +797,11 @@ class MainWindow(QMainWindow):
         )
         if answer == QMessageBox.Yes:
             self.store.delete(profile_id)
+            credential_reference = (profile.get("socksbridge") or {}).get(
+                "credential_ref"
+            )
+            if credential_reference:
+                self.credentials.delete(credential_reference)
             self.refresh()
 
     def clear_profile_cache(self, profile_id: str) -> None:

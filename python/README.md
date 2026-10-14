@@ -44,12 +44,20 @@ Environment data stays in the current user's application-data
 directory. The environment row menu can clear rebuildable browser caches
 without removing cookies, login state, history or local storage.
 
+The proxy tab can bind an environment to a fixed SocksBridge `proxy-NNN`
+route. Paste the SocksBridge subscription URL, load its routes, and select one
+fixed exit. Desktop stores the credential in the operating-system keychain and
+starts the pinned Mihomo v1.19.32 core before the browser. Auto and Random routes
+are deliberately unavailable because an environment must keep one exit. See
+[`docs/desktop-socksbridge.md`](../docs/desktop-socksbridge.md) for the security
+model, runtime files and the limits of the unprivileged leak guard.
+
 | Requirement | Value |
 |---|---|
 | Python | 3.10 or newer |
 | Playwright | below 1.63 (installed as a dependency) |
 | `geoip` extra | needed for `geoip=`; downloads the [GeoIP All-in-One](https://github.com/daijro/geoip-all-in-one) database, refreshed once it is a week old |
-| `desktop` extra | installs Qt Widgets and GeoIP support for `camoufox desktop` |
+| `desktop` extra | installs Qt Widgets, GeoIP and system-keychain support for `camoufox desktop` |
 
 `camoufox fetch` installs the browser build this release is paired with, and
 fpgen's model, pinned by sha256. Without it, the first launch downloads both.

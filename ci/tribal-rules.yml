@@ -155,6 +155,20 @@ rules:
       except_paths: ["python/pyproject.toml"]
       allowed_forms: ["-e ../../../python", "-e ./python", "-e python"]
 
+  - id: desktop-socksbridge-fixed-exit-fail-closed
+    title: A Desktop SocksBridge identity uses one fixed exit and never falls back to direct
+    check: manual
+    evidence:
+      - "SocksBridge docs/FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md sections 1, 5, 6 and 14"
+      - "https://github.com/mysuochao2-boop/socksbridge/blob/main/docs/FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md"
+    rationale: >-
+      Auto and Random routes change an identity's network fingerprint, while a
+      DIRECT fallback reveals its real network. Desktop therefore accepts only
+      stable proxy-NNN SocksBridge routes, validates Mihomo before launching the
+      browser, rejects unmatched and UDP traffic, and closes the browser if the
+      managed core exits. Subscription credentials stay in the operating-system
+      keychain rather than the environment JSON or a process argument.
+
   # -------------------------------------------------------------------------
   # Fonts
   # -------------------------------------------------------------------------
