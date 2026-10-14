@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from camoufox.desktop.launcher import ensure_fingerprint
+from camoufox.desktop.launcher import ensure_fingerprint, wait_for_browser_close
 from camoufox.desktop.profiles import ProfileStore, launch_kwargs, new_profile
 
 
@@ -88,6 +88,33 @@ def test_existing_fingerprint_is_not_regenerated():
     result = ensure_fingerprint(profile)
 
     assert result["fingerprint_preset"] is fingerprint
+
+
+def test_manual_window_close_stops_desktop_worker():
+    class Context:
+        def __init__(self):
+            self.pages = []
+
+    class Page:
+        def __init__(self, context):
+            self.context = context
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_event(self, event, timeout):
+            assert event == "close"
+            assert timeout == 0
+            self.closed = True
+            self.context.pages.remove(self)
+
+    context = Context()
+    context.pages = [Page(context), Page(context)]
+
+    wait_for_browser_close(context)
+
+    assert context.pages == []
 
 
 def test_missing_fingerprint_uses_target_os_preset(monkeypatch):

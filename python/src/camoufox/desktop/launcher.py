@@ -18,6 +18,14 @@ def ensure_fingerprint(profile: Dict[str, Any]) -> Dict[str, Any]:
     return profile
 
 
+def wait_for_browser_close(context: Any) -> None:
+    while True:
+        pages = [page for page in context.pages if not page.is_closed()]
+        if not pages:
+            return
+        pages[0].wait_for_event("close", timeout=0)
+
+
 def run_profile(
     store: ProfileStore,
     profile_id: str,
@@ -38,4 +46,4 @@ def run_profile(
             page.goto(start_url)
         store.mark_opened(profile_id)
         on_started()
-        context.wait_for_event("close", timeout=0)
+        wait_for_browser_close(context)
