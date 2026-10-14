@@ -252,8 +252,8 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
             return Managed()
 
     class Page:
-        def goto(self, url):
-            events.append(f"goto:{url}")
+        def goto(self, url, **kwargs):
+            events.append(f"goto:{url}:{kwargs.get('wait_until')}")
 
     class Context:
         pages = []
@@ -283,5 +283,6 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
 
     assert browser_options["proxy"] == Managed.proxy
     assert browser_options["geoip"] == Managed.exit_ip
+    assert f"goto:{profile['start_url']}:commit" in events
     assert events.index("mihomo-enter") < events.index("browser-enter")
     assert events[-2:] == ["browser-exit", "mihomo-exit"]

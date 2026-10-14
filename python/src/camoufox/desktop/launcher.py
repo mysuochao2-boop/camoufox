@@ -84,7 +84,7 @@ def run_profile(
         page = context.pages[0] if context.pages else context.new_page()
         start_url = str(profile.get("start_url") or "").strip()
         if start_url:
-            page.goto(start_url)
+            page.goto(start_url, wait_until="commit")
         store.mark_opened(profile_id)
         on_started()
         wait_for_browser_close(context, network_health)
