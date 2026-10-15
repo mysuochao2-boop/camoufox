@@ -46,6 +46,7 @@ from .profiles import (
 from .socksbridge import (
     SocksBridgeCredentialStore,
     fetch_socksbridge_nodes,
+    format_subscription_url,
     parse_subscription_url,
 )
 from .theme import stylesheet
@@ -79,6 +80,7 @@ class ProfileDialog(QDialog):
         credential_store: Optional[SocksBridgeCredentialStore] = None,
     ):
         super().__init__(parent)
+        self.is_new_profile = profile is None
         self.profile = (
             dict(profile)
             if profile
@@ -214,7 +216,6 @@ class ProfileDialog(QDialog):
         self.proxy_password = QLineEdit()
         self.proxy_password.setEchoMode(QLineEdit.Password)
         self.socksbridge_subscription = QLineEdit()
-        self.socksbridge_subscription.setEchoMode(QLineEdit.Password)
         self.socksbridge_subscription.setPlaceholderText(
             "https://proxy.51proxy.org/sub/USER_TOKEN"
         )
@@ -269,7 +270,11 @@ class ProfileDialog(QDialog):
         self.height.setValue(int(screen.get("height") or 0))
         proxy = profile.get("proxy") or {}
         socksbridge = profile.get("socksbridge") or {}
-        source = "socksbridge" if socksbridge.get("enabled") else "manual"
+        source = (
+            "socksbridge"
+            if self.is_new_profile or socksbridge.get("enabled")
+            else "manual"
+        )
         self.proxy_source.setCurrentIndex(max(self.proxy_source.findData(source), 0))
         self.proxy_type.setCurrentText(str(proxy.get("type") or "http"))
         self.proxy_host.setText(str(proxy.get("host") or ""))
@@ -282,6 +287,20 @@ class ProfileDialog(QDialog):
                 str(socksbridge.get("node_label") or node_id),
                 node_id,
             )
+        credential_reference = str(socksbridge.get("credential_ref") or "")
+        host = str(socksbridge.get("host") or "")
+        if socksbridge.get("enabled") and credential_reference and host:
+            try:
+                token = self.credential_store.get(credential_reference)
+            except RuntimeError:
+                self.socksbridge_subscription.setPlaceholderText(
+                    "订阅凭据缺失，请重新输入"
+                )
+            else:
+                self._pending_socksbridge = (host, token)
+                self.socksbridge_subscription.setText(
+                    format_subscription_url(host, token)
+                )
         self.geoip.setChecked(bool(profile.get("geoip", True)))
         self._proxy_source_changed()
 
@@ -302,13 +321,7 @@ class ProfileDialog(QDialog):
     def _load_socksbridge_nodes(self) -> None:
         try:
             value = self.socksbridge_subscription.text().strip()
-            if value:
-                host, token = parse_subscription_url(value)
-            else:
-                socksbridge = self.profile.get("socksbridge") or {}
-                host = str(socksbridge.get("host") or "")
-                reference = str(socksbridge.get("credential_ref") or "")
-                token = self.credential_store.get(reference)
+            host, token = parse_subscription_url(value)
             nodes = fetch_socksbridge_nodes(host, token)
         except Exception as error:
             QMessageBox.warning(self, "无法读取线路", str(error))
@@ -321,9 +334,8 @@ class ProfileDialog(QDialog):
         if index >= 0:
             self.socksbridge_node.setCurrentIndex(index)
         self._pending_socksbridge = (host, token)
-        self.socksbridge_subscription.clear()
-        self.socksbridge_subscription.setPlaceholderText(
-            "订阅凭据已读取并等待安全保存"
+        self.socksbridge_subscription.setText(
+            format_subscription_url(host, token)
         )
 
     def _choose_executable(self) -> None:
@@ -356,12 +368,23 @@ class ProfileDialog(QDialog):
         credential_reference = f"profile/{self.profile['id']}"
         existing_socksbridge = self.profile.get("socksbridge") or {}
         if use_socksbridge:
+            try:
+                selected_subscription = parse_subscription_url(
+                    self.socksbridge_subscription.text().strip()
+                )
+            except ValueError as error:
+                QMessageBox.warning(self, "无法保存", str(error))
+                return
+            if selected_subscription != self._pending_socksbridge:
+                QMessageBox.warning(
+                    self,
+                    "无法保存",
+                    "订阅地址已修改，请先点击“读取线路”验证并选择固定出口线路。",
+                )
+                return
+            assert self._pending_socksbridge is not None
             node_id = str(self.socksbridge_node.currentData() or "")
-            host = (
-                self._pending_socksbridge[0]
-                if self._pending_socksbridge
-                else str(existing_socksbridge.get("host") or "")
-            )
+            host = selected_subscription[0]
             socksbridge = {
                 "enabled": True,
                 "host": host,
@@ -411,13 +434,10 @@ class ProfileDialog(QDialog):
             return
         try:
             if use_socksbridge:
-                if self._pending_socksbridge:
-                    self.credential_store.set(
-                        credential_reference,
-                        self._pending_socksbridge[1],
-                    )
-                else:
-                    self.credential_store.get(credential_reference)
+                self.credential_store.set(
+                    credential_reference,
+                    self._pending_socksbridge[1],
+                )
             elif existing_socksbridge.get("credential_ref"):
                 self.credential_store.delete(existing_socksbridge["credential_ref"])
         except (RuntimeError, ValueError) as error:

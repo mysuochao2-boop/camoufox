@@ -12,6 +12,7 @@ from camoufox.desktop.profiles import (
 )
 from camoufox.desktop.socksbridge import (
     fetch_socksbridge_nodes,
+    format_subscription_url,
     parse_socksbridge_subscription,
     parse_subscription_url,
 )
@@ -79,6 +80,12 @@ def test_subscription_url_requires_https_and_returns_no_persisted_url():
     assert token == "secret-token"
     with pytest.raises(ValueError, match="HTTPS"):
         parse_subscription_url("http://proxy.51proxy.org/sub/secret-token")
+
+
+def test_subscription_url_can_be_reconstructed_for_editing():
+    assert format_subscription_url("proxy.51proxy.org", "secret-token") == (
+        "https://proxy.51proxy.org/sub/secret-token"
+    )
 
 
 def test_subscription_network_error_does_not_expose_token(monkeypatch):

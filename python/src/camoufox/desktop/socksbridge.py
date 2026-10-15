@@ -41,6 +41,12 @@ def parse_subscription_url(value: str) -> tuple[str, str]:
     return host, token
 
 
+def format_subscription_url(host: str, token: str) -> str:
+    value = f"https://{host}/sub/{token}"
+    parse_subscription_url(value)
+    return value
+
+
 def parse_socksbridge_subscription(
     content: str,
     *,
