@@ -54,6 +54,9 @@ helper and capture-based tests exist.
 The environment JSON stores only the SocksBridge host, stable node ID, display
 label and a keychain reference. It rejects subscription URLs, tokens and
 passwords. The keychain service name is `camoufox-desktop-socksbridge`.
+The edit dialog reconstructs and displays the subscription URL from that
+keychain credential so it can be changed, but it does not copy the URL into the
+environment JSON.
 
 Mihomo files live below the Desktop application-data directory:
 

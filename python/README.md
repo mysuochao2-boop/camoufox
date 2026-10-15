@@ -43,6 +43,9 @@ databases.
 Environment data stays in the current user's application-data
 directory. The environment row menu can clear rebuildable browser caches
 without removing cookies, login state, history or local storage.
+Desktop also saves each environment's open web tabs while it runs and restores
+them in order on the next launch. The configured start page is used only when
+the environment has no saved tabs.
 
 The proxy tab can bind an environment to a fixed SocksBridge `proxy-NNN`
 route. Paste the SocksBridge subscription URL, load its routes, and select one

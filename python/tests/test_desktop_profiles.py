@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from camoufox.desktop.launcher import ensure_fingerprint, wait_for_browser_close
+from camoufox.desktop.launcher import (
+    ensure_fingerprint,
+    load_saved_tabs,
+    restore_saved_tabs,
+    save_open_tabs,
+    wait_for_browser_close,
+)
 from camoufox.desktop.profiles import (
     ProfileStore,
     latest_local_executable,
@@ -139,6 +145,53 @@ def test_existing_fingerprint_is_not_regenerated():
     result = ensure_fingerprint(profile)
 
     assert result["fingerprint_preset"] is fingerprint
+
+
+def test_open_tabs_are_saved_without_internal_pages(tmp_path: Path):
+    class Page:
+        def __init__(self, url):
+            self.url = url
+
+    session_file = tmp_path / "desktop-tabs.json"
+
+    save_open_tabs(
+        [
+            Page("about:blank"),
+            Page("https://example.com/one"),
+            Page("https://example.com/two?view=active"),
+            Page("moz-extension://internal/page.html"),
+        ],
+        session_file,
+    )
+
+    assert load_saved_tabs(session_file) == [
+        "https://example.com/one",
+        "https://example.com/two?view=active",
+    ]
+
+
+def test_saved_tabs_replace_the_start_page_on_next_open(tmp_path: Path):
+    opened = []
+
+    class Page:
+        def goto(self, url, **kwargs):
+            opened.append((url, kwargs))
+
+    class Context:
+        def new_page(self):
+            return Page()
+
+    session_file = tmp_path / "desktop-tabs.json"
+    session_file.write_text(
+        '{"schema":1,"urls":["https://example.com/one","https://example.com/two"]}',
+        encoding="utf-8",
+    )
+
+    assert restore_saved_tabs(Context(), Page(), session_file) is True
+    assert opened == [
+        ("https://example.com/one", {"wait_until": "commit"}),
+        ("https://example.com/two", {"wait_until": "commit"}),
+    ]
 
 
 def test_manual_window_close_stops_desktop_worker():
