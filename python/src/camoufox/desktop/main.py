@@ -37,7 +37,12 @@ from PySide6.QtWidgets import (
 from camoufox.multiversion import list_installed
 
 from .launcher import run_profile
-from .profiles import ProfileStore, new_profile, validate_profile
+from .profiles import (
+    ProfileStore,
+    latest_local_executable,
+    new_profile,
+    validate_profile,
+)
 from .socksbridge import (
     SocksBridgeCredentialStore,
     fetch_socksbridge_nodes,
@@ -74,7 +79,11 @@ class ProfileDialog(QDialog):
         credential_store: Optional[SocksBridgeCredentialStore] = None,
     ):
         super().__init__(parent)
-        self.profile = dict(profile) if profile else new_profile(name="")
+        self.profile = (
+            dict(profile)
+            if profile
+            else new_profile(name="", executable_path=latest_local_executable())
+        )
         self.credential_store = credential_store or SocksBridgeCredentialStore()
         self._pending_socksbridge: Optional[tuple[str, str]] = None
         self.setWindowTitle("编辑环境" if profile else "新建环境")

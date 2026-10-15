@@ -1,9 +1,29 @@
+import os
 from pathlib import Path
 
 import pytest
 
 from camoufox.desktop.launcher import ensure_fingerprint, wait_for_browser_close
-from camoufox.desktop.profiles import ProfileStore, launch_kwargs, new_profile
+from camoufox.desktop.profiles import (
+    ProfileStore,
+    latest_local_executable,
+    launch_kwargs,
+    new_profile,
+)
+
+
+def test_latest_local_desktop_build_is_discovered(tmp_path: Path):
+    executable = Path("Camoufox.app/Contents/MacOS/camoufox")
+    older = tmp_path / "builds" / "older" / executable
+    newer = tmp_path / "builds" / "newer" / executable
+    older.parent.mkdir(parents=True)
+    newer.parent.mkdir(parents=True)
+    older.touch()
+    newer.touch()
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+
+    assert latest_local_executable(tmp_path) == str(newer)
 
 
 def test_profile_store_crud_and_copy(tmp_path: Path):

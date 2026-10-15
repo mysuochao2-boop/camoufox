@@ -31,12 +31,32 @@ def default_data_dir() -> Path:
     return Path(user_data_dir("camoufox-desktop", "Camoufox"))
 
 
+def latest_local_executable(root: Optional[Path] = None) -> str:
+    builds = (Path(root) if root is not None else default_data_dir()) / "builds"
+    candidates = []
+    for relative in (
+        ("Camoufox.app", "Contents", "MacOS", "camoufox"),
+        ("camoufox",),
+        ("camoufox.exe",),
+    ):
+        candidates.extend(
+            path
+            for path in builds.glob(f"*/{'/'.join(relative)}")
+            if path.is_file()
+        )
+    if not candidates:
+        return ""
+    latest = max(candidates, key=lambda path: (path.stat().st_mtime_ns, str(path)))
+    return str(latest)
+
+
 def new_profile(
     *,
     name: str,
     group: str = "Default",
     target_os: str = "",
     locale: str = "",
+    executable_path: str = "",
 ) -> Dict[str, Any]:
     now = _now()
     return {
@@ -46,7 +66,7 @@ def new_profile(
         "target_os": target_os,
         "locale": locale.strip(),
         "browser": "",
-        "executable_path": "",
+        "executable_path": executable_path,
         "start_url": "https://www.google.com/",
         "screen": {"width": None, "height": None},
         "proxy": {
