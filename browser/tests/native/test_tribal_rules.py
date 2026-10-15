@@ -599,6 +599,16 @@ def test_macos_webrender_uses_exact_cross_os_font_descriptor():
     )
 
 
+def test_browser_chrome_system_ui_uses_the_host_font():
+    patch = (BROWSER / "patches" / "system-ui-font-spoofing.patch").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "if (!aFontVisibilityProvider || aFontVisibilityProvider->IsChrome())"
+        in patch
+    ), explain("chrome-system-ui-uses-host-font")
+
+
 def test_no_canvas_seed_is_declared_or_sent():
     """Nothing in the browser reads a canvas seed, so neither launcher sends one."""
     declared = _live_properties()

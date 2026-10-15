@@ -204,6 +204,22 @@ rules:
       font tables is not acceptable because large CJK collections block browser
       startup.
 
+  - id: chrome-system-ui-uses-host-font
+    title: Browser chrome resolves system-ui with the host OS font
+    check: automated
+    evidence:
+      - "macOS 15.4.1 with a Windows or Linux identity: tab and URL-bar Latin text painted unrelated glyphs while page text and icons remained correct"
+      - "Mozilla bug 1803406: shaping and rasterizing with different CoreText faces paints the wrong glyph IDs"
+      - "commit b1a5799: null and chrome FontVisibilityProvider lookups keep the host system-ui family"
+    rationale: >-
+      Browser chrome is privileged UI and is not visible through page font APIs,
+      so it has no reason to use the identity's foreign-OS system-ui family. A
+      null provider is also an internal lookup and must follow the chrome path.
+      If either lookup resolves to a bundled Segoe UI or Ubuntu face on macOS,
+      the parent can shape with one face while WebRender rasterizes the glyph IDs
+      with another, producing unrelated letters in tabs and the URL bar. Content
+      documents still resolve system-ui for the OS their identity presents.
+
   # -------------------------------------------------------------------------
   # Measurement
   # -------------------------------------------------------------------------
