@@ -106,35 +106,80 @@ PROXY_LOOKUP_FAILED = (
 )
 
 
+# Plain-HTTP endpoints first: CONNECT/TLS through an HTTP proxy (e.g. local
+# Mihomo) often ends in SSLEOFError UNEXPECTED_EOF_WHILE_READING, and the last
+# HTTPS failure (ipecho.net) is what callers see even when every service failed.
+HTTP_IP_URLS = [
+    "http://api.ipify.org",
+    "http://icanhazip.com",
+    "http://ifconfig.me/ip",
+]
+
+HTTPS_IP_URLS = [
+    # Prefers IPv4
+    "https://api.ipify.org",
+    "https://checkip.amazonaws.com",
+    "https://ipinfo.io/ip",
+    # IPv4 & IPv6
+    "https://icanhazip.com",
+    "https://ifconfig.co/ip",
+    "https://ipecho.net/plain",
+]
+
+
+def _ip_from_response(resp: requests.Response) -> str:
+    content_type = (resp.headers.get("Content-Type") or "").lower()
+    body = resp.text.strip()
+    if "json" in content_type or body.startswith("{"):
+        data = resp.json()
+        body = str(data.get("query") or data.get("ip") or "").strip()
+    validate_ip(body)
+    return body
+
+
 @lru_cache(maxsize=None)
 def public_ip(proxy: Optional[str] = None) -> str:
     """
-    Sends a request to a public IP api
+    Sends a request to a public IP api.
+
+    When ``proxy`` is set, plain HTTP endpoints are tried before HTTPS so a
+    broken TLS tunnel through the proxy does not exhaust the list first.
     """
-    URLS = [
-        # Prefers IPv4
-        "https://api.ipify.org",
-        "https://checkip.amazonaws.com",
-        "https://ipinfo.io/ip",
-        # IPv4 & IPv6
-        "https://icanhazip.com",
-        "https://ifconfig.co/ip",
-        "https://ipecho.net/plain",
-    ]
+    if proxy:
+        urls = list(HTTP_IP_URLS) + list(HTTPS_IP_URLS)
+    else:
+        # Direct lookups prefer HTTPS; HTTP remains a fallback.
+        urls = list(HTTPS_IP_URLS) + list(HTTP_IP_URLS)
 
     end_exception = None
-    for url in URLS:
+    proxies = Proxy.as_requests_proxy(proxy) if proxy else None
+    for url in urls:
         try:
             resp = requests.get(
                 url,
-                proxies=Proxy.as_requests_proxy(proxy) if proxy else None,
+                proxies=proxies,
                 timeout=5,
                 verify=True,
             )
             resp.raise_for_status()
-            ip = resp.text.strip()
-            validate_ip(ip)
-            return ip
-        except (requests.exceptions.ProxyError, requests.RequestException, InvalidIP) as exception:
+            return _ip_from_response(resp)
+        except (
+            requests.exceptions.ProxyError,
+            requests.RequestException,
+            InvalidIP,
+            ValueError,
+        ) as exception:
             end_exception = exception
     raise InvalidIP(f"Failed to get IP address: {end_exception}")
+
+
+def resolve_proxy_exit_ip(proxy: str) -> str:
+    """
+    Exit IP seen through ``proxy``. Prefers the HTTP ip-api lookup (same as
+    NewContext), then falls back to ``public_ip``.
+    """
+    try:
+        exit_ip, _timezone = proxy_exit_geo(proxy)
+        return exit_ip
+    except InvalidIP:
+        return public_ip(proxy)

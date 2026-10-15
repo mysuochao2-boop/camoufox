@@ -86,7 +86,9 @@ def run_profile(
                 )
             )
             options["proxy"] = managed.proxy
-            if profile.get("geoip", True):
+            # Only pass a verified exit IP. An empty string means lookup failed
+            # after Mihomo was ready; skip GeoIP rather than aborting open.
+            if profile.get("geoip", True) and managed.exit_ip:
                 options["geoip"] = managed.exit_ip
             network_health = managed.is_healthy
 

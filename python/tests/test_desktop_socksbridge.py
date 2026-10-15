@@ -297,3 +297,73 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
     assert f"goto:{profile['start_url']}:commit" in events
     assert events.index("mihomo-enter") < events.index("browser-enter")
     assert events[-2:] == ["browser-exit", "mihomo-exit"]
+
+
+def test_socksbridge_opens_when_exit_ip_lookup_fails(monkeypatch, tmp_path: Path):
+    """Mihomo ready + IP lookup failure must not abort browser open."""
+    store = ProfileStore(tmp_path)
+    profile = new_profile(name="SoftFail", target_os="macos")
+    profile["fingerprint_preset"] = {"navigator": {"userAgent": "recorded"}}
+    profile["socksbridge"] = {
+        "enabled": True,
+        "host": "proxy.51proxy.org",
+        "node_id": "proxy-002",
+        "node_label": "US North Carolina | proxy-002",
+        "credential_ref": f"profile/{profile['id']}",
+    }
+    profile["geoip"] = True
+    profile = store.save(profile)
+    browser_options = {}
+
+    class Credentials:
+        def get(self, reference):
+            return "secret-token"
+
+    class Managed:
+        proxy = {"server": "http://127.0.0.1:41001"}
+        exit_ip = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def is_healthy(self):
+            return True
+
+    class Supervisor:
+        def start(self, binding):
+            return Managed()
+
+    class Page:
+        def goto(self, url, **kwargs):
+            pass
+
+    class Context:
+        pages = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def new_page(self):
+            return Page()
+
+    def camoufox(**options):
+        browser_options.update(options)
+        return Context()
+
+    monkeypatch.setattr("camoufox.sync_api.Camoufox", camoufox)
+
+    run_profile(
+        store,
+        profile["id"],
+        credential_store=Credentials(),
+        mihomo_supervisor=Supervisor(),
+    )
+
+    assert browser_options["proxy"] == Managed.proxy
+    assert "geoip" not in browser_options

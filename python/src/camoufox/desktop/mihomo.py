@@ -19,7 +19,8 @@ from typing import Any, Optional
 import requests
 import yaml
 
-from camoufox.ip import public_ip
+from camoufox.exceptions import InvalidIP
+from camoufox.ip import resolve_proxy_exit_ip
 
 from .profiles import default_data_dir
 from .socksbridge import NODE_ID_PATTERN, SOCKSBRIDGE_HOST
@@ -360,7 +361,15 @@ class MihomoSupervisor:
             managed = ManagedMihomo(process, runtime, listener_port, "")
             try:
                 self._wait_ready(process, controller_port, controller_secret, listener_port)
-                exit_ip = public_ip(f"http://127.0.0.1:{listener_port}")
+                proxy_url = f"http://127.0.0.1:{listener_port}"
+                try:
+                    # Prefer HTTP (ip-api / plain HTTP echo) through Mihomo; HTTPS
+                    # CONNECT often fails with SSLEOFError and used to abort open.
+                    exit_ip = resolve_proxy_exit_ip(proxy_url)
+                except InvalidIP:
+                    # Mihomo is healthy; missing GeoIP must not block the browser.
+                    # SocksBridge already forces block_webrtc and no DIRECT route.
+                    exit_ip = ""
                 return ManagedMihomo(process, runtime, listener_port, exit_ip)
             except Exception:
                 managed.close()

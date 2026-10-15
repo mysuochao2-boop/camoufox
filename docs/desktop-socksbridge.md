@@ -17,11 +17,13 @@ browser process:
 4. Run `mihomo -t` against the candidate configuration.
 5. Start Mihomo, authenticate its loopback controller, and check the private
    mixed listener.
-6. Resolve the public exit IP through that listener.
+6. Resolve the public exit IP through that listener (HTTP ip-api / plain HTTP
+   echo first; HTTPS fallbacks). A failed lookup no longer aborts launch:
+   GeoIP is skipped while the proxy and leak controls remain in force.
 7. Start Camoufox with that listener as its only proxy and use the verified IP
-   for GeoIP alignment.
+   for GeoIP alignment when step 6 succeeded.
 
-Any failure before step 7 aborts the browser launch. If Mihomo exits while the
+Any failure before step 6 (Mihomo not ready) aborts the browser launch. If Mihomo exits while the
 browser is running, Desktop closes the browser context. The generated Mihomo
 rules reject UDP and unmatched traffic; they contain no `DIRECT` route.
 The SocksBridge gateway connection supports both IP families and prefers IPv6
