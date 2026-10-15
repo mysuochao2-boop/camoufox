@@ -21,7 +21,18 @@ def bundle(tmp_path, monkeypatch):
     bin_dir = tmp_path / "dist" / "bin"
     (bin_dir / "fontconfig" / "linux").mkdir(parents=True)
     (bin_dir / "fontconfig" / "linux" / "fonts.conf").write_text(
-        '<?xml version="1.0"?><fontconfig><dir prefix="cwd">fonts</dir></fontconfig>'
+        """<?xml version="1.0"?>
+<fontconfig>
+  <dir prefix="cwd">fonts</dir>
+  <alias>
+    <family>system-ui</family>
+    <prefer>
+      <family>Noto Sans UI</family>
+      <family>Segoe UI</family>
+    </prefer>
+  </alias>
+</fontconfig>
+"""
     )
     (bin_dir / "fonts").mkdir()
 
@@ -54,3 +65,15 @@ def test_managed_install_is_used_when_no_path_is_given(tmp_path, monkeypatch):
         utils.get_env_vars({}, "lin")
 
     assert calls, "should have consulted the managed install"
+
+
+def test_linux_fontconfig_prefers_cjk_for_system_ui_chrome(bundle, monkeypatch):
+    """zh-CN chrome needs CJK under FONTCONFIG_FILE; Mac uses system fonts instead."""
+    env = utils.get_env_vars({}, "lin", path=bundle / "camoufox-bin")
+    conf = Path(env["FONTCONFIG_FILE"]).read_text()
+    # CJK faces must appear in the system-ui prefer list, before Latin UI faces.
+    sys_ui = conf.split("<family>system-ui</family>", 1)[1]
+    prefer = sys_ui.split("<prefer>", 1)[1].split("</prefer>", 1)[0]
+    assert "Noto Sans CJK SC" in prefer
+    assert prefer.index("Noto Sans CJK SC") < prefer.index("Noto Sans UI")
+

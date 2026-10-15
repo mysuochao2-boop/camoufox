@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import platform
 import shutil
@@ -171,15 +172,60 @@ def _generate_fontconfig(
         "\n\t".join(f'<dir>{d}</dir>' for d in scan_dirs),
     )
 
+    # Chrome UI (menus/tabs) is exempt from the fingerprint font allowlist, but
+    # on Linux FONTCONFIG_FILE still replaces *all* system fonts with the bundle.
+    # system-ui prefers Latin UI faces (Adwaita/Cantarell/Noto Sans UI); without
+    # CJK faces in that prefer list, zh-CN chrome paints as tofu/mojibake while
+    # Mac (Core Text + PingFang) looks fine. Prefer bundled CJK fallbacks first.
+    def _inject_cjk_system_ui(conf: str) -> str:
+        match = re.search(
+            r'(<family>system-ui</family>\s*<prefer>)(.*?)(</prefer>)',
+            conf,
+            flags=re.DOTALL,
+        )
+        if not match or 'Noto Sans CJK SC' in match.group(2):
+            return conf
+        indent_match = re.search(r'\n([ \t]*)<family>', match.group(2))
+        indent = indent_match.group(1) if indent_match else '\t\t\t'
+        cjk = (
+            f'\n{indent}<family>Noto Sans CJK SC</family>'
+            f'\n{indent}<family>Noto Sans CJK TC</family>'
+            f'\n{indent}<family>Droid Sans Fallback</family>'
+        )
+        return conf[: match.start(2)] + cjk + match.group(2) + conf[match.end(2) :]
+
+    conf_content = _inject_cjk_system_ui(conf_content)
+
     # INSTALL_DIR is platformdirs' user_cache_dir("camoufox"); see pkgman.
     cache_dir = str(INSTALL_DIR / 'fontconfig')
     os.makedirs(cache_dir, exist_ok=True)
 
     content_hash = hashlib.sha256(conf_content.encode()).hexdigest()[:12]
     runtime_conf = os.path.join(cache_dir, f'fonts-{content_hash}.conf')
+    cache_stamp = runtime_conf + '.fc-cache-ok'
     if not os.path.exists(runtime_conf):
         with open(runtime_conf, 'w') as f:
             f.write(conf_content)
+    # Warm the fontconfig cache before the first headed paint. A cold cache on
+    # Linux makes chrome paint before CJK faces are indexed → persistent tofu.
+    if not os.path.exists(cache_stamp):
+        try:
+            import subprocess
+
+            completed = subprocess.run(
+                ['fc-cache', '-f'],
+                env={**os.environ, 'FONTCONFIG_FILE': runtime_conf},
+                check=False,
+                capture_output=True,
+                timeout=120,
+            )
+            if completed.returncode == 0:
+                with open(cache_stamp, 'w') as f:
+                    f.write('1')
+        except Exception:
+            # fc-cache missing, timed out, or stamp unwritable: launch still works;
+            # first paint may briefly lack CJK until the browser builds its cache.
+            pass
 
     return runtime_conf
 
@@ -1035,18 +1081,15 @@ def launch_options(
     if i_know_what_im_doing is None:
         i_know_what_im_doing = False
 
-    # Windows-only: Firefox draws a Pre-XUL "skeleton" chrome window before the
-    # real browser, then tears it down (mozglue PreXULSkeletonUI.cpp). Headed
-    # Desktop opens looked like a garbled browser that auto-closes, then the
-    # correct Camoufox window. Official Firefox rejects -profile for the
-    # skeleton, but non-MOZILLA_OFFICIAL builds (and some approved Playwright
-    # flags) still allow it. Any unapproved CLI flag disables the skeleton;
-    # the prefs cover blankWindow / later reads of the same settings.
-    if OS_NAME == 'win' and headless is False:
-        if '--camoufox-no-skeleton' not in args and '-camoufox-no-skeleton' not in args:
-            args.append('--camoufox-no-skeleton')
-        firefox_user_prefs.setdefault('browser.startup.preXulSkeletonUI', False)
-        firefox_user_prefs.setdefault('browser.startup.blankWindow', False)
+    # NOTE: Do NOT set browser.startup.blankWindow / preXulSkeletonUI to false.
+    # Playwright already passes -juggler-pipe, which is not an approved Pre-XUL
+    # skeleton CLI flag, so the Windows skeleton never runs on this path.
+    # Forcing blankWindow=false (3fcd844) made the *first* real chrome window
+    # paint before FONTCONFIG / locale were ready on Win+Linux — persistent
+    # mojibake/tofu UI; Mac was fine (Core Text, no FONTCONFIG_FILE). Keep
+    # Firefox's default blankWindow so startup can finish fonts then show a
+    # correct window (brief early blank is preferable to a stuck garbled UI).
+
     # Keep per-launch overrides isolated from the process environment and from
     # mappings supplied by callers. In particular, DISPLAY must not outlive the
     # virtual display that owns it.

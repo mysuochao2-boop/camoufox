@@ -471,24 +471,25 @@ class TestDesktopOnlyWarning:
             browser.new_page()
 
 
-class TestWindowsSkeletonUI:
-    """Windows Pre-XUL skeleton: a throwaway chrome window that flashes then closes."""
+class TestStartupWindowPrefs:
+    """blankWindow=false caused persistent garbled chrome on Win+Linux (3fcd844).
 
-    def test_headed_windows_disables_prexul_skeleton_ui(self, monkeypatch, isolated_launch_dependencies):
+    Playwright already passes -juggler-pipe (unapproved for Pre-XUL skeleton), so
+    the skeleton never runs. Keep Firefox defaults for blankWindow /
+    preXulSkeletonUI so the first real window paints after fonts/locale are ready.
+    """
+
+    def test_headed_windows_does_not_force_blank_window_off(self, monkeypatch, isolated_launch_dependencies):
         monkeypatch.setattr(utils, "OS_NAME", "win")
         options = utils.launch_options(headless=False, block_webgl=True, i_know_what_im_doing=True)
-        assert "--camoufox-no-skeleton" in options["args"]
+        assert "--camoufox-no-skeleton" not in (options.get("args") or [])
         prefs = options["firefox_user_prefs"]
-        assert prefs["browser.startup.preXulSkeletonUI"] is False
-        assert prefs["browser.startup.blankWindow"] is False
+        assert prefs.get("browser.startup.preXulSkeletonUI") is not False
+        assert prefs.get("browser.startup.blankWindow") is not False
 
-    def test_headless_windows_does_not_need_skeleton_guard(self, monkeypatch, isolated_launch_dependencies):
-        monkeypatch.setattr(utils, "OS_NAME", "win")
-        options = utils.launch_options(headless=True, block_webgl=True, i_know_what_im_doing=True)
-        assert "--camoufox-no-skeleton" not in options["args"]
-
-    def test_headed_linux_does_not_add_windows_skeleton_flag(self, monkeypatch, isolated_launch_dependencies):
+    def test_headed_linux_does_not_force_blank_window_off(self, monkeypatch, isolated_launch_dependencies):
         monkeypatch.setattr(utils, "OS_NAME", "lin")
         options = utils.launch_options(headless=False, block_webgl=True, i_know_what_im_doing=True)
-        assert "--camoufox-no-skeleton" not in options["args"]
+        prefs = options["firefox_user_prefs"]
+        assert prefs.get("browser.startup.blankWindow") is not False
 
