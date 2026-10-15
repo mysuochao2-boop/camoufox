@@ -245,6 +245,16 @@ def test_the_probe_ignores_what_the_launcher_adds_to_the_environment():
     assert probe.call_args_list[0] == probe.call_args_list[1]
 
 
+def test_the_probe_always_runs_headless_so_a_headed_launch_does_not_flash():
+    """Desktop opens headed; a headed probe flashed stock Firefox (mojibake) then closed."""
+    from camoufox import host_rendering
+
+    with mock.patch.object(host_rendering, "_host_gpu", return_value=HOST_GPU) as probe:
+        host_gpu("/bin/camoufox", False, {"DISPLAY": ":0"})
+
+    assert probe.call_args == mock.call("/bin/camoufox", True, (("DISPLAY", ":0"),))
+
+
 def browser_on_host(gpu):
     browser = mock.MagicMock()
     browser.version = "150.0.2"

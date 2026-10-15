@@ -79,13 +79,18 @@ def set_webgpu(prefs: Dict[str, Any], target_os: str, gpu: Gpu, host: Optional[G
 def host_gpu(executable_path: str, headless: bool, env: Mapping[str, Any]) -> Optional[Gpu]:
     """The (vendor, renderer) this machine's Firefox reports, or None without WebGL.
 
-    Read from the binary about to launch, with no identity applied, under the
-    same display: headless, Xvfb and a real display can each render on a
-    different device. The strings are the ones Firefox sanitizes itself.
+    Read from the binary about to launch, with no identity applied. The probe
+    always runs headless so a headed Camoufox open does not flash a throwaway
+    window (stock Firefox without FONTCONFIG/locale → mojibake chrome, then
+    close). The launch env (DISPLAY, etc.) is still passed. ``headless`` is
+    kept for call-site compatibility and ignored: headless vs headed can
+    report different devices on some hosts; that residual risk is preferred
+    over a visible flash.
     """
+    _ = headless  # call-site compat; probe launch is always headless
     return _host_gpu(
         str(executable_path),
-        bool(headless),
+        True,
         tuple(sorted((k, str(v)) for k, v in env.items() if not k.startswith(_LAUNCHER_ENV))),
     )
 
