@@ -1034,6 +1034,19 @@ def launch_options(
         custom_fonts_only = False
     if i_know_what_im_doing is None:
         i_know_what_im_doing = False
+
+    # Windows-only: Firefox draws a Pre-XUL "skeleton" chrome window before the
+    # real browser, then tears it down (mozglue PreXULSkeletonUI.cpp). Headed
+    # Desktop opens looked like a garbled browser that auto-closes, then the
+    # correct Camoufox window. Official Firefox rejects -profile for the
+    # skeleton, but non-MOZILLA_OFFICIAL builds (and some approved Playwright
+    # flags) still allow it. Any unapproved CLI flag disables the skeleton;
+    # the prefs cover blankWindow / later reads of the same settings.
+    if OS_NAME == 'win' and headless is False:
+        if '--camoufox-no-skeleton' not in args and '-camoufox-no-skeleton' not in args:
+            args.append('--camoufox-no-skeleton')
+        firefox_user_prefs.setdefault('browser.startup.preXulSkeletonUI', False)
+        firefox_user_prefs.setdefault('browser.startup.blankWindow', False)
     # Keep per-launch overrides isolated from the process environment and from
     # mappings supplied by callers. In particular, DISPLAY must not outlive the
     # virtual display that owns it.

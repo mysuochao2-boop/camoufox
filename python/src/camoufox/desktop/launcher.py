@@ -52,6 +52,35 @@ def navigate_start_page(page: Any, start_url: str) -> None:
         pass
 
 
+
+def _first_page(context: Any, timeout_ms: int = 15000) -> Any:
+    """The startup about:blank page, waiting briefly if Playwright has not listed it yet."""
+    import time
+
+    pages = [page for page in context.pages if not page.is_closed()]
+    if pages:
+        return pages[0]
+
+    wait_for_event = getattr(context, "wait_for_event", None)
+    if wait_for_event is None:
+        return context.new_page()
+
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while True:
+        pages = [page for page in context.pages if not page.is_closed()]
+        if pages:
+            return pages[0]
+        remaining_ms = (deadline - time.monotonic()) * 1000.0
+        if remaining_ms <= 0:
+            return context.new_page()
+        try:
+            return wait_for_event("page", timeout=min(250, remaining_ms))
+        except PlaywrightTimeoutError:
+            pass
+
+
 def run_profile(
     store: ProfileStore,
     profile_id: str,
@@ -93,7 +122,10 @@ def run_profile(
             network_health = managed.is_healthy
 
         context = stack.enter_context(Camoufox(**options))
-        page = context.pages[0] if context.pages else context.new_page()
+        # Persistent headed launches open about:blank without -silent. Wait for
+        # that page instead of calling new_page() while pages is still empty —
+        # a second window was briefly visible on slow Windows startups.
+        page = _first_page(context)
         start_url = str(profile.get("start_url") or "").strip()
         if start_url:
             navigate_start_page(page, start_url)

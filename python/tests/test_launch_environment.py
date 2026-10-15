@@ -469,3 +469,26 @@ class TestDesktopOnlyWarning:
             warnings.simplefilter("error")
             browser.new_context(viewport={"width": 800, "height": 600}, is_mobile=False)
             browser.new_page()
+
+
+class TestWindowsSkeletonUI:
+    """Windows Pre-XUL skeleton: a throwaway chrome window that flashes then closes."""
+
+    def test_headed_windows_disables_prexul_skeleton_ui(self, monkeypatch, isolated_launch_dependencies):
+        monkeypatch.setattr(utils, "OS_NAME", "win")
+        options = utils.launch_options(headless=False, block_webgl=True, i_know_what_im_doing=True)
+        assert "--camoufox-no-skeleton" in options["args"]
+        prefs = options["firefox_user_prefs"]
+        assert prefs["browser.startup.preXulSkeletonUI"] is False
+        assert prefs["browser.startup.blankWindow"] is False
+
+    def test_headless_windows_does_not_need_skeleton_guard(self, monkeypatch, isolated_launch_dependencies):
+        monkeypatch.setattr(utils, "OS_NAME", "win")
+        options = utils.launch_options(headless=True, block_webgl=True, i_know_what_im_doing=True)
+        assert "--camoufox-no-skeleton" not in options["args"]
+
+    def test_headed_linux_does_not_add_windows_skeleton_flag(self, monkeypatch, isolated_launch_dependencies):
+        monkeypatch.setattr(utils, "OS_NAME", "lin")
+        options = utils.launch_options(headless=False, block_webgl=True, i_know_what_im_doing=True)
+        assert "--camoufox-no-skeleton" not in options["args"]
+
