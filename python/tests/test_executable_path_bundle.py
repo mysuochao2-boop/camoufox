@@ -67,13 +67,25 @@ def test_managed_install_is_used_when_no_path_is_given(tmp_path, monkeypatch):
     assert calls, "should have consulted the managed install"
 
 
-def test_linux_fontconfig_prefers_cjk_for_system_ui_chrome(bundle, monkeypatch):
-    """zh-CN chrome needs CJK under FONTCONFIG_FILE; Mac uses system fonts instead."""
+def test_linux_fontconfig_keeps_latin_ui_ahead_of_cjk(bundle, monkeypatch):
+    """Latin chrome must not pick Noto CJK first (wrong glyphs); CJK is fallback only."""
     env = utils.get_env_vars({}, "lin", path=bundle / "camoufox-bin")
     conf = Path(env["FONTCONFIG_FILE"]).read_text()
-    # CJK faces must appear in the system-ui prefer list, before Latin UI faces.
     sys_ui = conf.split("<family>system-ui</family>", 1)[1]
     prefer = sys_ui.split("<prefer>", 1)[1].split("</prefer>", 1)[0]
     assert "Noto Sans CJK SC" in prefer
-    assert prefer.index("Noto Sans CJK SC") < prefer.index("Noto Sans UI")
+    assert prefer.index("Noto Sans UI") < prefer.index("Noto Sans CJK SC")
+    # Host system dirs are appended after the bundle so chrome can use real UI faces.
+    assert "</fontconfig>" in conf
+    # Bundle fonts dir rewritten from cwd still present
+    assert str(bundle / "fonts") in conf
+
+
+def test_linux_fontconfig_does_not_put_cjk_before_latin_ui(bundle, monkeypatch):
+    """Regression: 32ba08b put CJK first and Latin tab/urlbar painted garbage glyphs."""
+    env = utils.get_env_vars({}, "lin", path=bundle / "camoufox-bin")
+    prefer = Path(env["FONTCONFIG_FILE"]).read_text().split("<prefer>", 1)[1].split("</prefer>", 1)[0]
+    first_family = prefer.split("<family>", 1)[1].split("</family>", 1)[0]
+    assert "CJK" not in first_family
+    assert "Droid Sans Fallback" not in first_family
 

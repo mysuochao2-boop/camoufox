@@ -10,7 +10,7 @@ index 42b2b42650..b0aac2e38a 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
-@@ -2298,9 +2299,57 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2298,9 +2299,59 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -24,12 +24,14 @@ index 42b2b42650..b0aac2e38a 100644
 +static MaskConfig::SpoofedOS SystemUISpoofedOS(
 +    FontVisibilityProvider* aFontVisibilityProvider) {
 +  using MaskConfig::SpoofedOS;
-+  if (aFontVisibilityProvider && aFontVisibilityProvider->IsChrome()) {
++  // Null provider = privileged/internal lookup (no content document). Same as
++  // chrome: keep the host UI font. Spoofing Segoe UI/Helvetica here made the
++  // parent shape chrome with a bundled face while WebRender rasterized with
++  // another → wrong glyphs in tabs/urlbar (not tofu; icons still OK).
++  if (!aFontVisibilityProvider || aFontVisibilityProvider->IsChrome()) {
 +    return SpoofedOS::None;
 +  }
-+  const mozilla::dom::Document* doc =
-+      aFontVisibilityProvider ? aFontVisibilityProvider->GetDocument()
-+                              : nullptr;
++  const mozilla::dom::Document* doc = aFontVisibilityProvider->GetDocument();
 +  const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(
 +      mozilla::dom::RoverfoxStorageManager::UserContextId(doc));
 +  switch (os) {
@@ -68,7 +70,7 @@ index 42b2b42650..b0aac2e38a 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2428,12 +2477,23 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2428,12 +2479,23 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -94,7 +96,7 @@ index 42b2b42650..b0aac2e38a 100644
    }
    return prefFonts;
  }
-@@ -3028,6 +3088,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+@@ -3028,6 +3090,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }

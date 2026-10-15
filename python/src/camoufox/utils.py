@@ -172,12 +172,18 @@ def _generate_fontconfig(
         "\n\t".join(f'<dir>{d}</dir>' for d in scan_dirs),
     )
 
-    # Chrome UI (menus/tabs) is exempt from the fingerprint font allowlist, but
-    # on Linux FONTCONFIG_FILE still replaces *all* system fonts with the bundle.
-    # system-ui prefers Latin UI faces (Adwaita/Cantarell/Noto Sans UI); without
-    # CJK faces in that prefer list, zh-CN chrome paints as tofu/mojibake while
-    # Mac (Core Text + PingFang) looks fine. Prefer bundled CJK fallbacks first.
-    def _inject_cjk_system_ui(conf: str) -> str:
+    # Chrome UI must stay legible. FONTCONFIG_FILE replaces all system fonts on
+    # Linux, so chrome (exempt from the fingerprint allowlist in Gecko) still
+    # only sees the bundle. Two rules:
+    #   1) Never put CJK faces *first* in system-ui prefer — that made Latin
+    #      chrome (tab titles, urlbar placeholder) pick Noto Sans CJK / a bad
+    #      OTC face and paint wrong glyphs (not tofu): e.g. "ŷ VZ ä".
+    #   2) Append host system font dirs *after* the bundle so real UI faces
+    #      remain reachable for chrome; bundled dirs stay first so content
+    #      named lookups still hit fingerprint fonts. MaskConfig continues to
+    #      block non-allowlisted families for content.
+    def _append_cjk_system_ui_fallback(conf: str) -> str:
+        """Add CJK faces at the *end* of system-ui prefer (Latin UI stays first)."""
         match = re.search(
             r'(<family>system-ui</family>\s*<prefer>)(.*?)(</prefer>)',
             conf,
@@ -192,9 +198,34 @@ def _generate_fontconfig(
             f'\n{indent}<family>Noto Sans CJK TC</family>'
             f'\n{indent}<family>Droid Sans Fallback</family>'
         )
-        return conf[: match.start(2)] + cjk + match.group(2) + conf[match.end(2) :]
+        # Insert before </prefer>, after existing Latin UI prefers.
+        return conf[: match.start(3)] + cjk + conf[match.start(3) :]
 
-    conf_content = _inject_cjk_system_ui(conf_content)
+    def _append_host_system_font_dirs(conf: str) -> str:
+        host_dirs = []
+        for d in (
+            '/usr/share/fonts',
+            '/usr/local/share/fonts',
+            os.path.expanduser('~/.local/share/fonts'),
+            os.path.expanduser('~/.fonts'),
+        ):
+            if os.path.isdir(d) and d not in host_dirs:
+                host_dirs.append(d)
+        if not host_dirs:
+            return conf
+        # Only add dirs not already present; place before </fontconfig>.
+        additions = ''.join(
+            f'\n\t<dir>{d}</dir>' for d in host_dirs if f'<dir>{d}</dir>' not in conf
+        )
+        if not additions:
+            return conf
+        close = '</fontconfig>'
+        if close not in conf:
+            return conf
+        return conf.replace(close, additions + '\n' + close, 1)
+
+    conf_content = _append_cjk_system_ui_fallback(conf_content)
+    conf_content = _append_host_system_font_dirs(conf_content)
 
     # INSTALL_DIR is platformdirs' user_cache_dir("camoufox"); see pkgman.
     cache_dir = str(INSTALL_DIR / 'fontconfig')
