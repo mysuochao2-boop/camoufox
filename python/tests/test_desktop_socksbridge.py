@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 
 from camoufox.desktop.launcher import navigate_start_page, run_profile
-from camoufox.desktop.mihomo import MihomoBinding, build_mihomo_config
+from camoufox.desktop.mihomo import (
+    MihomoBinding,
+    MihomoSupervisor,
+    build_mihomo_config,
+)
 from camoufox.desktop.profiles import (
     ProfileStore,
     launch_kwargs,
@@ -137,6 +141,79 @@ def test_mihomo_config_is_fixed_exit_and_fail_closed():
     assert config["proxies"][0]["udp"] is False
     assert config["rules"] == ["NETWORK,UDP,REJECT", "MATCH,REJECT"]
     assert "DIRECT" not in str(config)
+
+
+def test_mihomo_readiness_ignores_environment_proxies(monkeypatch):
+    from contextlib import nullcontext
+
+    class Process:
+        @staticmethod
+        def poll():
+            return None
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    class Session:
+        trust_env = True
+        closed = False
+
+        def get(self, url, **_kwargs):
+            assert url == "http://127.0.0.1:41002/version"
+            assert self.trust_env is False
+            return Response()
+
+        def close(self):
+            self.closed = True
+
+    session = Session()
+    monkeypatch.setattr(
+        "camoufox.desktop.mihomo.requests.get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("global requests.get inherits proxy variables")
+        ),
+    )
+    monkeypatch.setattr(
+        "camoufox.desktop.mihomo.requests.Session", lambda: session
+    )
+    monkeypatch.setattr(
+        "camoufox.desktop.mihomo.socket.create_connection",
+        lambda *_args, **_kwargs: nullcontext(),
+    )
+
+    MihomoSupervisor._wait_ready(Process(), 41002, "secret", 41001)
+
+    assert session.closed is True
+
+
+def test_edit_dialog_selects_the_saved_socksbridge_node():
+    from PySide6.QtWidgets import QApplication
+
+    from camoufox.desktop.main import ProfileDialog
+
+    class Credentials:
+        @staticmethod
+        def get(_reference):
+            return "secret-token"
+
+    application = QApplication.instance() or QApplication([])
+    profile = new_profile(name="Existing SocksBridge environment")
+    profile["socksbridge"] = {
+        "enabled": True,
+        "host": "proxy.51proxy.org",
+        "node_id": "proxy-002",
+        "node_label": "US North Carolina | proxy-002",
+        "credential_ref": f"profile/{profile['id']}",
+    }
+
+    dialog = ProfileDialog(profile, credential_store=Credentials())
+    try:
+        assert dialog.socksbridge_node.currentData() == "proxy-002"
+    finally:
+        dialog.close()
+        application.processEvents()
 
 
 def test_start_page_timeout_does_not_stop_the_browser():

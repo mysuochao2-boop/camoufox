@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import pytest
 from camoufox.desktop.launcher import (
     ensure_fingerprint,
     load_saved_tabs,
+    open_tab_urls,
     restore_saved_tabs,
     save_open_tabs,
     wait_for_browser_close,
@@ -16,6 +18,12 @@ from camoufox.desktop.profiles import (
     launch_kwargs,
     new_profile,
 )
+
+
+def test_new_profile_opens_browserscan_by_default():
+    assert new_profile(name="Fingerprint check")["start_url"] == (
+        "https://www.browserscan.net/zh"
+    )
 
 
 def test_latest_local_desktop_build_is_discovered(tmp_path: Path):
@@ -45,15 +53,49 @@ def test_profile_store_crud_and_copy(tmp_path: Path):
 
     stored = store.save(profile)
     assert store.get(stored["id"])["name"] == "Shop account"
+    assert stored["number"] == 1
 
     duplicate = store.duplicate(stored["id"])
     assert duplicate["id"] != stored["id"]
+    assert duplicate["number"] == 2
     assert duplicate["name"] == "Shop account copy"
     assert duplicate["fingerprint_preset"] is None
     assert store.profile_dir(duplicate["id"]) != store.profile_dir(stored["id"])
 
     store.delete(stored["id"])
     assert [item["id"] for item in store.list()] == [duplicate["id"]]
+
+
+def test_environment_numbers_are_not_reused_after_delete(tmp_path: Path):
+    store = ProfileStore(tmp_path)
+    first = store.save(new_profile(name="First"))
+    second = store.save(new_profile(name="Second"))
+
+    store.delete(second["id"])
+    third = store.save(new_profile(name="Third"))
+
+    assert (first["number"], second["number"], third["number"]) == (1, 2, 3)
+
+
+def test_schema_one_profiles_receive_numbers_by_creation_time(tmp_path: Path):
+    store = ProfileStore(tmp_path)
+    newer = new_profile(name="Newer")
+    older = new_profile(name="Older")
+    newer["created_at"] = "2026-10-16T02:00:00+00:00"
+    older["created_at"] = "2026-10-16T01:00:00+00:00"
+    store.file.write_text(
+        json.dumps({"schema": 1, "profiles": [newer, older]}),
+        encoding="utf-8",
+    )
+
+    migrated_profiles = store.list()
+    migrated = {profile["name"]: profile["number"] for profile in migrated_profiles}
+    third = store.save(new_profile(name="Third"))
+
+    assert migrated == {"Newer": 2, "Older": 1}
+    assert [profile["name"] for profile in migrated_profiles] == ["Older", "Newer"]
+    assert third["number"] == 3
+    assert json.loads(store.file.read_text(encoding="utf-8"))["schema"] == 2
 
 
 def test_store_rejects_invalid_proxy(tmp_path: Path):
@@ -175,11 +217,10 @@ def test_saved_tabs_replace_the_start_page_on_next_open(tmp_path: Path):
 
     class Page:
         def goto(self, url, **kwargs):
-            opened.append((url, kwargs))
+            opened.append(("current", url, kwargs))
 
-    class Context:
-        def new_page(self):
-            return Page()
+        def evaluate(self, script, url):
+            opened.append(("tab", script, url))
 
     session_file = tmp_path / "desktop-tabs.json"
     session_file.write_text(
@@ -187,10 +228,14 @@ def test_saved_tabs_replace_the_start_page_on_next_open(tmp_path: Path):
         encoding="utf-8",
     )
 
-    assert restore_saved_tabs(Context(), Page(), session_file) is True
+    assert restore_saved_tabs(Page(), session_file) is True
     assert opened == [
-        ("https://example.com/one", {"wait_until": "commit"}),
-        ("https://example.com/two", {"wait_until": "commit"}),
+        ("current", "https://example.com/one", {"wait_until": "commit"}),
+        (
+            "tab",
+            "(url) => { window.open(url, '_blank'); }",
+            "https://example.com/two",
+        ),
     ]
 
 
@@ -219,6 +264,98 @@ def test_manual_window_close_stops_desktop_worker():
     wait_for_browser_close(context)
 
     assert context.pages == []
+
+
+def test_browser_shutdown_keeps_the_complete_tab_snapshot():
+    snapshots = []
+
+    class Context:
+        def __init__(self):
+            self.pages = []
+
+    class Page:
+        def __init__(self, context, url):
+            self.context = context
+            self.url = url
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_event(self, event, timeout):
+            assert event == "close"
+            assert timeout == 250
+            self.closed = True
+            self.context.pages.remove(self)
+
+    context = Context()
+    context.pages = [
+        Page(context, "https://example.com/one"),
+        Page(context, "https://example.com/two"),
+        Page(context, "https://example.com/three"),
+    ]
+
+    wait_for_browser_close(
+        context,
+        on_pages_changed=lambda pages: snapshots.append(open_tab_urls(pages)),
+    )
+
+    assert snapshots == [
+        [
+            "https://example.com/one",
+            "https://example.com/two",
+            "https://example.com/three",
+        ]
+    ]
+
+
+def test_closing_one_tab_updates_the_snapshot_after_pages_stabilize():
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    snapshots = []
+
+    class Context:
+        def __init__(self):
+            self.pages = []
+
+    class Page:
+        def __init__(self, context, url, timeouts_before_close=0):
+            self.context = context
+            self.url = url
+            self.timeouts_before_close = timeouts_before_close
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def wait_for_event(self, _event, timeout):
+            assert timeout == 250
+            if self.timeouts_before_close:
+                self.timeouts_before_close -= 1
+                raise PlaywrightTimeoutError("still open")
+            self.closed = True
+            self.context.pages.remove(self)
+
+    context = Context()
+    context.pages = [
+        Page(context, "https://example.com/closed"),
+        Page(context, "https://example.com/kept-one", timeouts_before_close=2),
+        Page(context, "https://example.com/kept-two"),
+    ]
+
+    wait_for_browser_close(
+        context,
+        on_pages_changed=lambda pages: snapshots.append(open_tab_urls(pages)),
+    )
+
+    assert snapshots == [
+        [
+            "https://example.com/closed",
+            "https://example.com/kept-one",
+            "https://example.com/kept-two",
+        ],
+        ["https://example.com/kept-one", "https://example.com/kept-two"],
+    ]
 
 
 def test_mihomo_exit_closes_browser_fail_closed():

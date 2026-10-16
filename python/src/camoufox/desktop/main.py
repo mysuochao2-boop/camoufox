@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -38,6 +39,7 @@ from camoufox.multiversion import list_installed
 
 from .launcher import run_profile
 from .profiles import (
+    DEFAULT_START_URL,
     ProfileStore,
     latest_local_executable,
     new_profile,
@@ -50,6 +52,16 @@ from .socksbridge import (
     parse_subscription_url,
 )
 from .theme import stylesheet
+
+
+def _style_button(
+    button: QPushButton | QToolButton,
+    variant: str = "secondary",
+    *,
+    compact: bool = False,
+) -> None:
+    button.setProperty("variant", variant)
+    button.setProperty("compact", compact)
 
 
 class BrowserWorker(QThread):
@@ -89,9 +101,12 @@ class ProfileDialog(QDialog):
         self.credential_store = credential_store or SocksBridgeCredentialStore()
         self._pending_socksbridge: Optional[tuple[str, str]] = None
         self.setWindowTitle("编辑环境" if profile else "新建环境")
-        self.setMinimumSize(680, 650)
+        self.setMinimumSize(720, 680)
+        self.resize(760, 720)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 20)
+        root.setSpacing(12)
         title = QLabel("编辑浏览器环境" if profile else "创建新的浏览器环境")
         title.setObjectName("dialogTitle")
         subtitle = QLabel("每个环境拥有独立的指纹、代理、Cookie 与本地存储。")
@@ -106,8 +121,12 @@ class ProfileDialog(QDialog):
         root.addWidget(tabs, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Save).setText("保存环境")
-        buttons.button(QDialogButtonBox.Cancel).setText("取消")
+        save = buttons.button(QDialogButtonBox.Save)
+        cancel = buttons.button(QDialogButtonBox.Cancel)
+        save.setText("保存环境")
+        cancel.setText("取消")
+        _style_button(save, "primary")
+        _style_button(cancel, "ghost")
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -117,13 +136,16 @@ class ProfileDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         form.setContentsMargins(24, 24, 24, 24)
-        form.setSpacing(16)
+        form.setHorizontalSpacing(24)
+        form.setVerticalSpacing(14)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.name = QLineEdit()
         self.name.setPlaceholderText("例如：美国店铺 01")
         self.group = QLineEdit()
         self.group.setPlaceholderText("默认分组")
         self.start_url = QLineEdit()
-        self.start_url.setPlaceholderText("https://www.google.com/")
+        self.start_url.setPlaceholderText(DEFAULT_START_URL)
         form.addRow("环境名称 *", self.name)
         form.addRow("分组", self.group)
         form.addRow("启动页", self.start_url)
@@ -139,7 +161,10 @@ class ProfileDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         form.setContentsMargins(24, 24, 24, 24)
-        form.setSpacing(16)
+        form.setHorizontalSpacing(24)
+        form.setVerticalSpacing(14)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.target_os = QComboBox()
         for label, value in (
             ("自动匹配本机", ""),
@@ -161,6 +186,7 @@ class ProfileDialog(QDialog):
             lambda value: self.browser.setEnabled(not value.strip())
         )
         choose_executable = QPushButton("选择…")
+        _style_button(choose_executable, compact=True)
         choose_executable.clicked.connect(self._choose_executable)
         executable = QWidget()
         executable_layout = QHBoxLayout(executable)
@@ -200,7 +226,11 @@ class ProfileDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         form.setContentsMargins(24, 24, 24, 24)
-        form.setSpacing(16)
+        form.setHorizontalSpacing(24)
+        form.setVerticalSpacing(14)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.proxy_form = form
         self.proxy_source = QComboBox()
         self.proxy_source.addItem("手动 HTTP / SOCKS 代理", "manual")
         self.proxy_source.addItem("SocksBridge 固定线路（Mihomo）", "socksbridge")
@@ -220,12 +250,14 @@ class ProfileDialog(QDialog):
             "https://proxy.51proxy.org/sub/USER_TOKEN"
         )
         self.load_socksbridge_nodes = QPushButton("读取线路")
+        _style_button(self.load_socksbridge_nodes, compact=True)
         self.load_socksbridge_nodes.clicked.connect(self._load_socksbridge_nodes)
         subscription = QWidget()
         subscription_layout = QHBoxLayout(subscription)
         subscription_layout.setContentsMargins(0, 0, 0, 0)
         subscription_layout.addWidget(self.socksbridge_subscription, 1)
         subscription_layout.addWidget(self.load_socksbridge_nodes)
+        self.socksbridge_subscription_row = subscription
         self.socksbridge_node = QComboBox()
         self.socksbridge_node.setPlaceholderText("先读取订阅线路")
         self.geoip = QCheckBox(
@@ -287,6 +319,7 @@ class ProfileDialog(QDialog):
                 str(socksbridge.get("node_label") or node_id),
                 node_id,
             )
+            self.socksbridge_node.setCurrentIndex(0)
         credential_reference = str(socksbridge.get("credential_ref") or "")
         host = str(socksbridge.get("host") or "")
         if socksbridge.get("enabled") and credential_reference and host:
@@ -314,9 +347,12 @@ class ProfileDialog(QDialog):
             self.proxy_password,
         ):
             widget.setEnabled(not socksbridge)
+            self.proxy_form.setRowVisible(widget, not socksbridge)
         self.socksbridge_subscription.setEnabled(socksbridge)
         self.socksbridge_node.setEnabled(socksbridge)
         self.load_socksbridge_nodes.setEnabled(socksbridge)
+        self.proxy_form.setRowVisible(self.socksbridge_subscription_row, socksbridge)
+        self.proxy_form.setRowVisible(self.socksbridge_node, socksbridge)
 
     def _load_socksbridge_nodes(self) -> None:
         try:
@@ -331,8 +367,7 @@ class ProfileDialog(QDialog):
         for node in nodes:
             self.socksbridge_node.addItem(node.label, node.id)
         index = self.socksbridge_node.findData(selected)
-        if index >= 0:
-            self.socksbridge_node.setCurrentIndex(index)
+        self.socksbridge_node.setCurrentIndex(index if index >= 0 else 0)
         self._pending_socksbridge = (host, token)
         self.socksbridge_subscription.setText(
             format_subscription_url(host, token)
@@ -473,20 +508,20 @@ class MainWindow(QMainWindow):
     def _sidebar(self) -> QWidget:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(230)
+        sidebar.setFixedWidth(224)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(16, 22, 16, 18)
-        layout.setSpacing(10)
-        brand = QLabel("◆  Camoufox")
+        layout.setContentsMargins(14, 22, 14, 18)
+        layout.setSpacing(8)
+        brand = QLabel("Camoufox")
         brand.setObjectName("brand")
         layout.addWidget(brand)
-        create = QPushButton("＋  新建环境")
-        create.setObjectName("primary")
+        create = QPushButton("新建环境")
+        _style_button(create, "primary")
         create.clicked.connect(self.create_profile)
         layout.addWidget(create)
         layout.addSpacing(8)
-        self.environment_nav = QPushButton("▣  环境管理")
-        self.proxy_nav = QPushButton("◎  代理管理")
+        self.environment_nav = QPushButton("环境管理")
+        self.proxy_nav = QPushButton("代理管理")
         for index, button in enumerate((self.environment_nav, self.proxy_nav)):
             button.setCheckable(True)
             button.setObjectName("nav")
@@ -494,7 +529,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(button)
         self.environment_nav.setChecked(True)
         layout.addStretch(1)
-        footer = QLabel("本地环境 · 数据不上传\nCamoufox Desktop MVP")
+        footer = QLabel("本地环境\n数据仅保存在此设备")
         footer.setObjectName("sidebarFooter")
         layout.addWidget(footer)
         return sidebar
@@ -524,8 +559,8 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         header.addLayout(self._heading("环境管理", "创建并管理隔离的浏览器身份"))
         header.addStretch(1)
-        add = QPushButton("＋ 新建环境")
-        add.setObjectName("primarySmall")
+        add = QPushButton("新建环境")
+        _style_button(add, "primary")
         add.clicked.connect(self.create_profile)
         header.addWidget(add)
         layout.addLayout(header)
@@ -538,20 +573,36 @@ class MainWindow(QMainWindow):
         self.group_filter.setMinimumWidth(170)
         self.group_filter.currentIndexChanged.connect(self.refresh_table)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("搜索环境名称、ID 或代理")
+        self.search.setPlaceholderText("搜索环境名称、编号或代理")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.refresh_table)
         tools.addWidget(self.group_filter)
         tools.addWidget(self.search, 1)
         refresh = QPushButton("刷新")
+        _style_button(refresh, "ghost", compact=True)
         refresh.clicked.connect(self.refresh)
         tools.addWidget(refresh)
         layout.addWidget(toolbar)
 
         self.table = self._table(
-            ["编号", "分组", "名称", "设备指纹", "IP 代理", "最近打开", "操作"]
+            [
+                "编号",
+                "分组",
+                "名称",
+                "设备指纹",
+                "IP 代理",
+                "创建时间",
+                "最近打开",
+                "操作",
+            ]
         )
         self.table.doubleClicked.connect(lambda _index: self.open_selected())
+        for column in (0, 1, 5, 6, 7):
+            self.table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeToContents
+            )
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
+        self.table.setColumnWidth(7, 126)
         layout.addWidget(self.table, 1)
         self.status = QLabel("")
         self.status.setObjectName("muted")
@@ -577,6 +628,10 @@ class MainWindow(QMainWindow):
         self.proxy_table = self._table(
             ["环境", "协议", "代理服务器", "用户名", "GeoIP 同步", "操作"]
         )
+        self.proxy_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.Fixed
+        )
+        self.proxy_table.setColumnWidth(5, 82)
         layout.addWidget(self.proxy_table, 1)
         return page
 
@@ -588,8 +643,9 @@ class MainWindow(QMainWindow):
         table.setSelectionMode(QAbstractItemView.SingleSelection)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(62)
+        table.verticalHeader().setDefaultSectionSize(56)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         return table
@@ -618,6 +674,7 @@ class MainWindow(QMainWindow):
             haystack = " ".join(
                 [
                     profile.get("id", ""),
+                    str(profile.get("number") or ""),
                     profile.get("name", ""),
                     proxy.get("host", ""),
                     (profile.get("socksbridge") or {}).get("node_label", ""),
@@ -634,7 +691,7 @@ class MainWindow(QMainWindow):
         profiles = self._filtered_profiles()
         self.table.setRowCount(len(profiles))
         for row, profile in enumerate(profiles):
-            identifier = QTableWidgetItem(profile["id"][:8])
+            identifier = QTableWidgetItem(str(profile["number"]))
             identifier.setData(Qt.UserRole, profile["id"])
             self.table.setItem(row, 0, identifier)
             self.table.setItem(row, 1, QTableWidgetItem(profile.get("group") or "Default"))
@@ -664,9 +721,14 @@ class MainWindow(QMainWindow):
             self.table.setItem(
                 row,
                 5,
+                QTableWidgetItem(self._format_time(profile.get("created_at"))),
+            )
+            self.table.setItem(
+                row,
+                6,
                 QTableWidgetItem(self._format_time(profile.get("last_opened_at"))),
             )
-            self.table.setCellWidget(row, 6, self._actions(profile))
+            self.table.setCellWidget(row, 7, self._actions(profile))
         self.status.setText(f"共 {len(profiles)} 个环境 · {len(self.workers)} 个正在运行")
 
     def refresh_proxy_table(self) -> None:
@@ -715,6 +777,7 @@ class MainWindow(QMainWindow):
                 QTableWidgetItem("已开启" if profile.get("geoip") else "已关闭"),
             )
             edit = QPushButton("编辑")
+            _style_button(edit, "ghost", compact=True)
             edit.clicked.connect(lambda _checked=False, pid=profile["id"]: self.edit_profile(pid))
             self.proxy_table.setCellWidget(row, 5, edit)
 
@@ -725,12 +788,17 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         running = profile["id"] in self.workers
         open_button = QPushButton("运行中" if running else "打开")
-        open_button.setObjectName("open")
+        _style_button(open_button, "primary", compact=True)
         open_button.setEnabled(not running)
         open_button.clicked.connect(
             lambda _checked=False, pid=profile["id"]: self.open_profile(pid)
         )
-        more = QPushButton("•••")
+        more = QToolButton()
+        more.setText("更多")
+        more.setToolTip("更多操作")
+        more.setAccessibleName("更多操作")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        _style_button(more, "ghost", compact=True)
         menu = QMenu(more)
         edit = QAction("编辑", menu)
         duplicate = QAction("复制", menu)
@@ -878,7 +946,7 @@ class MainWindow(QMainWindow):
         if not value:
             return "从未"
         try:
-            return datetime.fromisoformat(value).astimezone().strftime("%m-%d %H:%M")
+            return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M")
         except ValueError:
             return value
 

@@ -15,12 +15,13 @@ from typing import Any, Dict, Optional
 from platformdirs import user_data_dir
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TARGET_OSES = {"", "windows", "macos", "linux"}
 PROXY_TYPES = {"http", "https", "socks4", "socks5"}
 BROWSER_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SOCKSBRIDGE_NODE_PATTERN = re.compile(r"^proxy-[0-9]{3,}$")
 SOCKSBRIDGE_HOST = "proxy.51proxy.org"
+DEFAULT_START_URL = "https://www.browserscan.net/zh"
 
 
 def _now() -> str:
@@ -67,7 +68,7 @@ def new_profile(
         "locale": locale.strip(),
         "browser": "",
         "executable_path": executable_path,
-        "start_url": "https://www.google.com/",
+        "start_url": DEFAULT_START_URL,
         "screen": {"width": None, "height": None},
         "proxy": {
             "type": "http",
@@ -96,6 +97,9 @@ def validate_profile(profile: Dict[str, Any]) -> None:
         raise ValueError("Environment ID is required")
     if not str(profile.get("name", "")).strip():
         raise ValueError("Environment name is required")
+    number = profile.get("number")
+    if number is not None and (type(number) is not int or number < 1):
+        raise ValueError("Environment number must be a positive integer")
     if profile.get("target_os", "") not in TARGET_OSES:
         raise ValueError("Unsupported target OS")
     browser = profile.get("browser", "")
@@ -224,19 +228,47 @@ class ProfileStore:
 
     def _read(self) -> Dict[str, Any]:
         if not self.file.exists():
-            return {"schema": SCHEMA_VERSION, "profiles": []}
+            return {"schema": SCHEMA_VERSION, "next_number": 1, "profiles": []}
         try:
             data = json.loads(self.file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"Could not read environments: {error}") from error
-        if data.get("schema") != SCHEMA_VERSION or not isinstance(data.get("profiles"), list):
+        profiles = data.get("profiles")
+        if data.get("schema") not in (1, SCHEMA_VERSION) or not isinstance(profiles, list):
             raise ValueError("Unsupported environments file")
+        if data["schema"] == 1:
+            profiles.sort(
+                key=lambda item: (
+                    str(item.get("created_at") or ""),
+                    str(item.get("id") or ""),
+                )
+            )
+            for number, profile in enumerate(profiles, 1):
+                profile["number"] = number
+            return {
+                "schema": SCHEMA_VERSION,
+                "next_number": len(profiles) + 1,
+                "profiles": profiles,
+            }
+        numbers = [profile.get("number") for profile in profiles]
+        next_number = data.get("next_number")
+        if (
+            any(type(number) is not int or number < 1 for number in numbers)
+            or len(numbers) != len(set(numbers))
+            or type(next_number) is not int
+            or next_number <= max(numbers, default=0)
+        ):
+            raise ValueError("Invalid environment numbering")
         return data
 
-    def _write(self, profiles: list[Dict[str, Any]]) -> None:
+    def _write(self, profiles: list[Dict[str, Any]], next_number: int) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(
-            {"schema": SCHEMA_VERSION, "profiles": profiles},
+            {
+                "schema": SCHEMA_VERSION,
+                "next_number": next_number,
+                "profiles": profiles,
+            },
             ensure_ascii=False,
             indent=2,
         )
@@ -267,14 +299,19 @@ class ProfileStore:
         saved["name"] = saved["name"].strip()
         saved["group"] = str(saved.get("group") or "Default").strip()
         saved["updated_at"] = _now()
-        profiles = self.list()
+        data = self._read()
+        profiles = data["profiles"]
+        next_number = data["next_number"]
         for index, existing in enumerate(profiles):
             if existing.get("id") == saved["id"]:
+                saved["number"] = existing["number"]
                 profiles[index] = saved
                 break
         else:
+            saved["number"] = next_number
+            next_number += 1
             profiles.append(saved)
-        self._write(profiles)
+        self._write(profiles, next_number)
         return copy.deepcopy(saved)
 
     def duplicate(self, profile_id: str) -> Dict[str, Any]:
@@ -291,8 +328,11 @@ class ProfileStore:
         return self.save(profile)
 
     def delete(self, profile_id: str) -> None:
-        profiles = [profile for profile in self.list() if profile.get("id") != profile_id]
-        self._write(profiles)
+        data = self._read()
+        profiles = [
+            profile for profile in data["profiles"] if profile.get("id") != profile_id
+        ]
+        self._write(profiles, data["next_number"])
         directory = self.profile_dir(profile_id)
         if directory.exists():
             shutil.rmtree(directory)

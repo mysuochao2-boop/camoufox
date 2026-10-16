@@ -11,6 +11,9 @@ license = "MIT"
 repository = "https://github.com/daijro/camoufox"
 homepage = "https://camoufox.com/python"
 readme = "README.md"
+include = [
+    { path = "src/camoufox/desktop/assets/*.svg", format = ["sdist", "wheel"] },
+]
 keywords = [
     "client",
     "fingerprint",

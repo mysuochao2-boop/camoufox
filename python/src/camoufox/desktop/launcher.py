@@ -15,6 +15,8 @@ from .socksbridge import SocksBridgeCredentialStore
 
 SESSION_FILE_NAME = "desktop-tabs.json"
 RESTORABLE_SCHEMES = {"file", "http", "https"}
+PAGE_CHANGE_STABLE_POLLS = 2
+OPEN_TAB_SCRIPT = "(url) => { window.open(url, '_blank'); }"
 
 
 def ensure_fingerprint(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,10 +39,29 @@ def wait_for_browser_close(
 ) -> None:
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+    notified_state = None
+    pending_state = None
+    stable_polls = 0
     while True:
         pages = [page for page in context.pages if not page.is_closed()]
         if pages and on_pages_changed is not None:
-            on_pages_changed(pages)
+            state = tuple((id(page), str(page.url or "")) for page in pages)
+            if notified_state is None:
+                on_pages_changed(pages)
+                notified_state = state
+            elif state == notified_state:
+                pending_state = None
+                stable_polls = 0
+            elif state != pending_state:
+                pending_state = state
+                stable_polls = 0
+            else:
+                stable_polls += 1
+                if stable_polls >= PAGE_CHANGE_STABLE_POLLS:
+                    on_pages_changed(pages)
+                    notified_state = state
+                    pending_state = None
+                    stable_polls = 0
         if is_network_healthy is not None and not is_network_healthy():
             context.close()
             raise RuntimeError(
@@ -115,13 +136,13 @@ def load_saved_tabs(session_file: Path) -> list[str]:
     return urls
 
 
-def restore_saved_tabs(context: Any, first_page: Any, session_file: Path) -> bool:
+def restore_saved_tabs(first_page: Any, session_file: Path) -> bool:
     urls = load_saved_tabs(session_file)
     if not urls:
         return False
     navigate_start_page(first_page, urls[0])
     for url in urls[1:]:
-        navigate_start_page(context.new_page(), url)
+        first_page.evaluate(OPEN_TAB_SCRIPT, url)
     return True
 
 
@@ -200,7 +221,7 @@ def run_profile(
         # a second window was briefly visible on slow Windows startups.
         page = _first_page(context)
         start_url = str(profile.get("start_url") or "").strip()
-        if not restore_saved_tabs(context, page, session_file) and start_url:
+        if not restore_saved_tabs(page, session_file) and start_url:
             navigate_start_page(page, start_url)
         store.mark_opened(profile_id)
         on_started()

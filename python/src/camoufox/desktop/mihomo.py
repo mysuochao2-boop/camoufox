@@ -385,19 +385,26 @@ class MihomoSupervisor:
         controller_secret: str,
         listener_port: int,
     ) -> None:
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise RuntimeError("Mihomo exited before becoming ready")
-            try:
-                response = requests.get(
-                    f"http://127.0.0.1:{controller_port}/version",
-                    headers={"Authorization": f"Bearer {controller_secret}"},
-                    timeout=0.5,
-                )
-                response.raise_for_status()
-                with socket.create_connection(("127.0.0.1", listener_port), timeout=0.5):
-                    return
-            except (OSError, requests.RequestException):
-                time.sleep(0.1)
-        raise RuntimeError("Mihomo did not become ready")
+        session = requests.Session()
+        session.trust_env = False
+        try:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError("Mihomo exited before becoming ready")
+                try:
+                    response = session.get(
+                        f"http://127.0.0.1:{controller_port}/version",
+                        headers={"Authorization": f"Bearer {controller_secret}"},
+                        timeout=0.5,
+                    )
+                    response.raise_for_status()
+                    with socket.create_connection(
+                        ("127.0.0.1", listener_port), timeout=0.5
+                    ):
+                        return
+                except (OSError, requests.RequestException):
+                    time.sleep(0.1)
+            raise RuntimeError("Mihomo did not become ready")
+        finally:
+            session.close()
