@@ -135,7 +135,7 @@ describe.skipIf(!MODEL.ok)("the host's OS", () => {
 		expect(placeholder(options)).toBe(false);
 	});
 
-	it("a pinned GPU is kept without a probe and covers the canvas", async () => {
+	it("a pinned different GPU is kept and covers the canvas", async () => {
 		const probes = onHost(HOST_GPU);
 		const { options, config } = await launch({
 			os: "linux",
@@ -144,7 +144,7 @@ describe.skipIf(!MODEL.ok)("the host's OS", () => {
 
 		expect(gpuOf(config)).toEqual(OTHER_GPU);
 		expect(placeholder(options)).toBe(true);
-		expect(probes).toEqual([]);
+		expect(probes).toEqual([[BUNDLE_EXE, false]]);
 	});
 
 	it("a named GPU in the config covers the canvas", async () => {
@@ -156,7 +156,7 @@ describe.skipIf(!MODEL.ok)("the host's OS", () => {
 
 		expect(gpuOf(config)).toEqual(OTHER_GPU);
 		expect(placeholder(options)).toBe(true);
-		expect(probes).toEqual([]);
+		expect(probes).toEqual([[BUNDLE_EXE, false]]);
 	});
 
 	it("a pinned GPU stays uncovered on request", async () => {
@@ -168,6 +168,18 @@ describe.skipIf(!MODEL.ok)("the host's OS", () => {
 		});
 
 		expect(placeholder(options)).toBe(false);
+	});
+
+	it("a pinned GPU matching the host needs no canvas placeholder", async () => {
+		const probes = onHost(HOST_GPU);
+		const { options, config } = await launch({
+			os: "linux",
+			webgl_config: HOST_GPU,
+		});
+
+		expect(gpuOf(config)).toEqual(HOST_GPU);
+		expect(placeholder(options)).toBe(false);
+		expect(probes).toEqual([[BUNDLE_EXE, false]]);
 	});
 
 	it("noise on request needs no probe", async () => {

@@ -992,27 +992,30 @@ export type HostIdentity = [TargetOS | null, Gpu | null];
  * Whether the canvas is covered, and the host GPU the identity claims.
  *
  * The canvas renders on the host, so the identity claims the host's GPU when it
- * can: on the host's OS, with no GPU named, on a hardware GPU fpgen has
- * recorded there. A software renderer matches any GPU, and with WebGL off no GPU
- * is claimed. Any other identity contradicts the pixels, so the canvas is
- * covered unless the caller chose canvas_noise: false.
+ * can: on the host's OS, when an explicitly claimed GPU is either absent or
+ * matches the host, and fpgen has recorded that hardware there. A software
+ * renderer matches any GPU, and with WebGL off no GPU is claimed. Any other
+ * identity contradicts the pixels, so the canvas is covered unless the caller
+ * chose canvas_noise: false.
  */
 export async function planRendering(
 	targetOs: string | null,
 	canvasNoise: boolean | null | undefined,
-	namedGpu: boolean,
+	claimedGpu: Gpu | null,
 	webglDisabled: boolean,
 	probe: () => Promise<Gpu | null>,
 ): Promise<[boolean, Gpu | null]> {
 	if (canvasNoise) return [true, null];
-	if (targetOs && targetOs === utilsDeps.hostOsKey() && !namedGpu) {
+	if (targetOs && targetOs === utilsDeps.hostOsKey()) {
 		const host = webglDisabled ? null : await probe();
 		if (!rendersOnHardware(host)) return [false, null];
 		const recorded = await utilsDeps.firefoxGpus(targetOs);
 		if (
 			recorded.some(
 				([vendor, renderer]) => vendor === host[0] && renderer === host[1],
-			)
+			) &&
+			(claimedGpu == null ||
+				(claimedGpu[0] === host[0] && claimedGpu[1] === host[1]))
 		) {
 			return [false, host];
 		}
@@ -1038,7 +1041,7 @@ export async function hostIdentity(
 	const [covered, gpu] = await planRendering(
 		hostOs,
 		undefined,
-		false,
+		null,
 		Boolean(prefs["webgl.disabled"]),
 		() =>
 			utilsDeps.hostGpu(
@@ -1277,8 +1280,8 @@ export interface LaunchOptions {
 	 * privacy.resistFingerprinting does in LibreWolf, Tor Browser and Mullvad
 	 * Browser. Stock Firefox does not, so it warns. By default (undefined) the
 	 * identity on the host's OS claims the GPU the host renders with, uncovered;
-	 * it is on whenever the identity claims another OS or another GPU
-	 * (webgl_config, a preset's, or a host GPU fpgen never recorded), whose
+	 * it is on whenever the identity claims another OS, a configured or preset
+	 * GPU different from the host's, or a host GPU fpgen never recorded, whose
 	 * canvas would otherwise show the host. */
 	canvas_noise?: boolean | null;
 	/** Additional Firefox launch options, passed straight through to Playwright. */
@@ -1797,11 +1800,15 @@ export async function launchOptions({
 		? String(executable_path)
 		: utilsDeps.launchPath();
 
+	const claimedGpu: Gpu | null = pyTruthy(webgl_config)
+		? (webgl_config as Gpu)
+		: pyTruthy(config["webGl:vendor"]) && pyTruthy(config["webGl:renderer"])
+			? [config["webGl:vendor"], config["webGl:renderer"]]
+			: null;
 	const [coverCanvas, host] = await planRendering(
 		targetOs,
 		canvas_noise,
-		pyTruthy(webgl_config) ||
-			(pyTruthy(config["webGl:vendor"]) && pyTruthy(config["webGl:renderer"])),
+		claimedGpu,
 		Boolean(block_webgl),
 		() => utilsDeps.hostGpu(resolvedExecutable, headless, env),
 	);

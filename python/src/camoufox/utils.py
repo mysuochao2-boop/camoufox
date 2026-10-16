@@ -799,25 +799,26 @@ def attach_context_defaults(browser: Any, no_viewport_default: bool) -> None:
 def plan_rendering(
     target_os: str,
     canvas_noise: Optional[bool],
-    named_gpu: bool,
+    claimed_gpu: Optional[Gpu],
     webgl_disabled: bool,
     probe: Callable[[], Optional[Gpu]],
 ) -> Tuple[bool, Optional[Gpu]]:
     """Whether the canvas is covered, and the host GPU the identity claims.
 
     The canvas renders on the host, so the identity claims the host's GPU when
-    it can: on the host's OS, with no GPU named, on a hardware GPU fpgen has
-    recorded there. A software renderer matches any GPU, and with WebGL off no
-    GPU is claimed. Any other identity contradicts the pixels, so the canvas is
-    covered unless the caller chose canvas_noise=False.
+    it can: on the host's OS, when an explicitly claimed GPU is either absent
+    or matches the host, and fpgen has recorded that hardware there. A software
+    renderer matches any GPU, and with WebGL off no GPU is claimed. Any other
+    identity contradicts the pixels, so the canvas is covered unless the caller
+    chose canvas_noise=False.
     """
     if canvas_noise:
         return True, None
-    if target_os == _host_os_key() and not named_gpu:
+    if target_os == _host_os_key():
         host = None if webgl_disabled else probe()
         if not renders_on_hardware(host):
             return False, None
-        if host in firefox_gpus(target_os):
+        if host in firefox_gpus(target_os) and claimed_gpu in (None, host):
             return False, host
     return canvas_noise is None, None
 
@@ -834,7 +835,7 @@ def host_identity(from_options: Dict[str, Any], canvas_noise: Optional[bool]) ->
     # Without the placeholder, the launch claimed the host's OS and no named GPU.
     host_os = _host_os_key()
     covered, gpu = plan_rendering(
-        host_os, None, False, bool(prefs.get('webgl.disabled')),
+        host_os, None, None, bool(prefs.get('webgl.disabled')),
         lambda: host_gpu(from_options['executable_path'], from_options['headless'], from_options['env']),
     )
     return None if covered else (host_os, gpu)
@@ -1089,8 +1090,9 @@ def launch_options(
             Mullvad Browser. Stock Firefox does not, so it warns. By default
             (None) the identity on the host's OS claims the GPU the host
             renders with, uncovered; it is on whenever the identity claims
-            another OS or another GPU (webgl_config, a preset's, or a host GPU
-            fpgen never recorded), whose canvas would otherwise show the host.
+            another OS, a configured or preset GPU different from the host's,
+            or a host GPU fpgen never recorded, whose canvas would otherwise
+            show the host.
         **launch_options (Dict[str, Any]):
             Additional Firefox launch options.
     """
@@ -1583,10 +1585,13 @@ def launch_options(
     # the screen, which the host core count and the display clamp replace.
     coherence.drop_incoherent_source_values(config, target_os)
 
+    claimed_gpu = webgl_config
+    if not claimed_gpu and config.get('webGl:vendor') and config.get('webGl:renderer'):
+        claimed_gpu = (config['webGl:vendor'], config['webGl:renderer'])
     cover_canvas, host = plan_rendering(
         target_os,
         canvas_noise,
-        bool(webgl_config or (config.get('webGl:vendor') and config.get('webGl:renderer'))),
+        claimed_gpu,
         bool(block_webgl),
         lambda: host_gpu(browser_binary, headless, env),
     )

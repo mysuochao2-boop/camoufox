@@ -127,8 +127,9 @@ come from the real OS, driver and GPU, whatever the identity claims.
   The pixels then agree with the identity. A host that renders in software (no
   GPU driver, as on most servers) keeps a drawn GPU: it reads as a machine
   whose driver failed to load.
-- **On another OS, or with another GPU** (`webgl_config`, a preset's GPU, or a
-  host GPU fpgen never recorded), the pixels would show the real one. Camoufox
+- **On another OS, or with another GPU** (a `webgl_config` or preset GPU that
+  differs from the host, or a host GPU fpgen never recorded), the pixels would
+  show the real one. Camoufox
   then turns on the canvas protection of `privacy.resistFingerprinting`, and
   only that:
   canvas and WebGL readback return random data, as in LibreWolf, Tor Browser

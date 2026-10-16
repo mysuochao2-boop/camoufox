@@ -109,13 +109,13 @@ class TestHostOs:
 
         assert not placeholder(options)
 
-    def test_a_pinned_gpu_is_kept_without_a_probe_and_covers_the_canvas(self):
+    def test_a_pinned_different_gpu_is_kept_and_covers_the_canvas(self):
         with on_host(HOST_GPU) as probes:
             options, config = launch(os="linux", webgl_config=OTHER_GPU)
 
         assert (config["webGl:vendor"], config["webGl:renderer"]) == OTHER_GPU
         assert placeholder(options)
-        assert probes == []
+        assert probes == [("/nonexistent/camoufox", False)]
 
     def test_a_named_gpu_in_the_config_covers_the_canvas(self):
         with on_host(HOST_GPU) as probes:
@@ -125,13 +125,21 @@ class TestHostOs:
 
         assert (config["webGl:vendor"], config["webGl:renderer"]) == OTHER_GPU
         assert placeholder(options)
-        assert probes == []
+        assert probes == [("/nonexistent/camoufox", False)]
 
     def test_a_pinned_gpu_stays_uncovered_on_request(self):
         with on_host(HOST_GPU):
             options, _ = launch(os="linux", webgl_config=OTHER_GPU, canvas_noise=False)
 
         assert not placeholder(options)
+
+    def test_a_pinned_gpu_matching_the_host_needs_no_canvas_placeholder(self):
+        with on_host(HOST_GPU) as probes:
+            options, config = launch(os="linux", webgl_config=HOST_GPU)
+
+        assert (config["webGl:vendor"], config["webGl:renderer"]) == HOST_GPU
+        assert not placeholder(options)
+        assert probes == [("/nonexistent/camoufox", False)]
 
     def test_noise_on_request_needs_no_probe(self):
         with on_host(HOST_GPU) as probes:

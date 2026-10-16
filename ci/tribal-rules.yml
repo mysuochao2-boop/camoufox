@@ -297,15 +297,17 @@ rules:
       - "v156.0.1-beta.32: the three RFP canvas targets in privacy.baselineFingerprintingProtection.overrides give RFP's readback (random, toDataURL ~770 bytes) with hardwareConcurrency untouched"
       - "v156.0.1-beta.32: a Linux host with an RTX 5080 and a Ryzen iGPU reported 'AMD, Radeon HD 3200 Graphics, or similar' to WebGL, headless and headed"
       - "v156.0.1-beta.32: a Linux identity whose config claimed availHeight 1053 on a 1080 screen read 1080 (nsRFPService::GetSpoofedScreenAvailSize, no Linux offset)"
+      - "2026-10-16 on an Apple M1 host: a macOS preset claiming the exact Firefox-reported 'Apple M1, or similar' GPU was incorrectly covered merely because the preset named it, and Canvas checks detected the RFP placeholder"
     rationale: >-
       Canvas and WebGL pixels come from the host's OS, driver and GPU. On the
       host's OS the identity claims the GPU Firefox reports there, read from the
       browser itself because Firefox may render on another device than system
       tools name and sanitizes the name its own way; a software renderer
       matches any GPU, as a machine whose driver failed to load. On another OS,
-      or with another GPU (one the caller or a preset names, or a host GPU
-      fpgen never recorded, which has no WebGL data to claim), nothing can
-      agree, and Firefox 156's private windows do not hide pixels, so the
+      or with another GPU (one the caller or a preset names that differs from
+      the probed host GPU, or a host GPU fpgen never recorded, which has no
+      WebGL data to claim), nothing can agree, and Firefox 156's private
+      windows do not hide pixels, so the
       launchers turn on privacy.resistFingerprinting's canvas targets through
       the baseline overrides and nothing else. One function in each launcher
       (plan_rendering, planRendering) makes that decision for the launch and
