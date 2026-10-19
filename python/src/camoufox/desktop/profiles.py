@@ -14,13 +14,17 @@ from typing import Any, Dict, Optional
 
 from platformdirs import user_data_dir
 
+from .socksbridge import (
+    NODE_ID_PATTERN,
+    SOCKSBRIDGE_HOSTS,
+    normalize_local_upstream_proxy,
+)
+
 
 SCHEMA_VERSION = 2
 TARGET_OSES = {"", "windows", "macos", "linux"}
 PROXY_TYPES = {"http", "https", "socks4", "socks5"}
 BROWSER_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-SOCKSBRIDGE_NODE_PATTERN = re.compile(r"^proxy-[0-9]{3,}$")
-SOCKSBRIDGE_HOST = "proxy.51proxy.org"
 DEFAULT_START_URL = "https://www.browserscan.net/zh"
 
 
@@ -83,6 +87,7 @@ def new_profile(
             "node_id": "",
             "node_label": "",
             "credential_ref": "",
+            "upstream_proxy": None,
         },
         "geoip": True,
         "fingerprint_preset": None,
@@ -123,15 +128,16 @@ def validate_profile(profile: Dict[str, Any]) -> None:
     if forbidden_secrets:
         raise ValueError("SocksBridge secrets must be kept in the credential store")
     if socksbridge.get("enabled"):
-        if socksbridge.get("host") != SOCKSBRIDGE_HOST:
+        if socksbridge.get("host") not in SOCKSBRIDGE_HOSTS:
             raise ValueError("Unsupported SocksBridge host")
-        if not SOCKSBRIDGE_NODE_PATTERN.fullmatch(
+        if not NODE_ID_PATTERN.fullmatch(
             str(socksbridge.get("node_id") or "")
         ):
             raise ValueError("A fixed SocksBridge proxy node is required")
         expected_reference = f"profile/{profile['id']}"
         if socksbridge.get("credential_ref") != expected_reference:
             raise ValueError("Invalid SocksBridge credential reference")
+        normalize_local_upstream_proxy(socksbridge.get("upstream_proxy"))
 
     proxy = profile.get("proxy") or {}
     host = str(proxy.get("host") or "").strip()

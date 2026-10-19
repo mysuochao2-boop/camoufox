@@ -5,6 +5,10 @@ SocksBridge exit. This integration follows the SocksBridge
 `FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md` design without linking Mihomo into
 the Python process or accepting arbitrary Mihomo YAML.
 
+Subscription URLs may use the official `proxy.51proxy.org` or
+`proxy-hk.51proxy.org` gateway. Other hosts remain rejected; the selected host
+is also required to match every fixed node returned by its subscription.
+
 ## Launch sequence
 
 For a SocksBridge environment, Desktop performs these steps before creating a
@@ -26,9 +30,18 @@ browser process:
 Any failure before step 6 (Mihomo not ready) aborts the browser launch. If Mihomo exits while the
 browser is running, Desktop closes the browser context. The generated Mihomo
 rules reject UDP and unmatched traffic; they contain no `DIRECT` route.
-The SocksBridge gateway connection supports both IP families and prefers IPv6
+The SocksBridge gateway connection supports both IP families and prefers IPv4
 when the gateway domain has both records. This affects only how Mihomo reaches
 the selected upstream proxy; browser traffic still has no direct route.
+
+An environment may optionally connect to its SocksBridge gateway through a
+local HTTP proxy. Desktop exposes this as a loopback-only endpoint with a
+configurable port (default `127.0.0.1:7890`). The generated SocksBridge proxy
+uses Mihomo's `dialer-proxy` field to reference that local proxy, so the final
+website still sees the selected SocksBridge exit rather than the local proxy's
+exit. Desktop refuses to start the environment when the configured loopback
+port is unavailable; it never removes `dialer-proxy` or falls back to a direct
+gateway connection.
 
 Each running environment currently owns one Mihomo process, controller and
 listener. This intentionally favors an independent failure domain over the
@@ -57,6 +70,12 @@ passwords. The keychain service name is `camoufox-desktop-socksbridge`.
 The edit dialog reconstructs and displays the subscription URL from that
 keychain credential so it can be changed, but it does not copy the URL into the
 environment JSON.
+
+Desktop may also keep one default subscription URL under the
+`default/subscription` keychain reference. New environment dialogs display
+that value in the editable subscription field. The default remains a local
+keychain secret and is never compiled into the application or written to an
+environment profile.
 
 Mihomo files live below the Desktop application-data directory:
 

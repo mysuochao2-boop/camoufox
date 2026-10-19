@@ -260,6 +260,21 @@ class ProfileDialog(QDialog):
         self.socksbridge_subscription_row = subscription
         self.socksbridge_node = QComboBox()
         self.socksbridge_node.setPlaceholderText("先读取订阅线路")
+        self.socksbridge_upstream_enabled = QCheckBox("通过本地 Clash 连接")
+        self.socksbridge_upstream_enabled.toggled.connect(
+            self._proxy_source_changed
+        )
+        self.socksbridge_upstream_port = QSpinBox()
+        self.socksbridge_upstream_port.setRange(1, 65535)
+        self.socksbridge_upstream_port.setValue(7890)
+        upstream = QWidget()
+        upstream_layout = QHBoxLayout(upstream)
+        upstream_layout.setContentsMargins(0, 0, 0, 0)
+        upstream_layout.addWidget(self.socksbridge_upstream_enabled)
+        upstream_layout.addStretch(1)
+        upstream_layout.addWidget(QLabel("127.0.0.1:"))
+        upstream_layout.addWidget(self.socksbridge_upstream_port)
+        self.socksbridge_upstream_row = upstream
         self.geoip = QCheckBox(
             "根据代理出口 IP 自动匹配时区、语言、定位与 WebRTC IP"
         )
@@ -272,10 +287,11 @@ class ProfileDialog(QDialog):
         form.addRow("密码", self.proxy_password)
         form.addRow("SocksBridge 订阅", subscription)
         form.addRow("固定出口线路", self.socksbridge_node)
+        form.addRow("前置代理", upstream)
         form.addRow("", self.geoip)
         note = QLabel(
             "SocksBridge 仅允许固定 proxy-NNN 线路。Token 保存在系统钥匙串；"
-            "Mihomo 未就绪或退出时浏览器不会直连。"
+            "启用前置代理后，Clash 不可用时环境不会回退直连。"
         )
         note.setWordWrap(True)
         note.setObjectName("hint")
@@ -334,6 +350,20 @@ class ProfileDialog(QDialog):
                 self.socksbridge_subscription.setText(
                     format_subscription_url(host, token)
                 )
+        elif self.is_new_profile:
+            try:
+                subscription = self.credential_store.get_default_subscription()
+            except RuntimeError:
+                subscription = ""
+            if subscription:
+                host, token = parse_subscription_url(subscription)
+                self._pending_socksbridge = (host, token)
+                self.socksbridge_subscription.setText(subscription)
+        upstream_proxy = socksbridge.get("upstream_proxy") or {}
+        self.socksbridge_upstream_enabled.setChecked(bool(upstream_proxy))
+        self.socksbridge_upstream_port.setValue(
+            int(upstream_proxy.get("port") or 7890)
+        )
         self.geoip.setChecked(bool(profile.get("geoip", True)))
         self._proxy_source_changed()
 
@@ -351,8 +381,13 @@ class ProfileDialog(QDialog):
         self.socksbridge_subscription.setEnabled(socksbridge)
         self.socksbridge_node.setEnabled(socksbridge)
         self.load_socksbridge_nodes.setEnabled(socksbridge)
+        self.socksbridge_upstream_enabled.setEnabled(socksbridge)
+        self.socksbridge_upstream_port.setEnabled(
+            socksbridge and self.socksbridge_upstream_enabled.isChecked()
+        )
         self.proxy_form.setRowVisible(self.socksbridge_subscription_row, socksbridge)
         self.proxy_form.setRowVisible(self.socksbridge_node, socksbridge)
+        self.proxy_form.setRowVisible(self.socksbridge_upstream_row, socksbridge)
 
     def _load_socksbridge_nodes(self) -> None:
         try:
@@ -420,12 +455,22 @@ class ProfileDialog(QDialog):
             assert self._pending_socksbridge is not None
             node_id = str(self.socksbridge_node.currentData() or "")
             host = selected_subscription[0]
+            upstream_proxy = (
+                {
+                    "type": "http",
+                    "host": "127.0.0.1",
+                    "port": self.socksbridge_upstream_port.value(),
+                }
+                if self.socksbridge_upstream_enabled.isChecked()
+                else None
+            )
             socksbridge = {
                 "enabled": True,
                 "host": host,
                 "node_id": node_id,
                 "node_label": self.socksbridge_node.currentText().strip(),
                 "credential_ref": credential_reference,
+                "upstream_proxy": upstream_proxy,
             }
         else:
             socksbridge = {
@@ -434,6 +479,7 @@ class ProfileDialog(QDialog):
                 "node_id": "",
                 "node_label": "",
                 "credential_ref": "",
+                "upstream_proxy": None,
             }
         self.profile.update(
             {
@@ -922,10 +968,16 @@ class MainWindow(QMainWindow):
             self.open_profile(profile_id)
 
     def open_profile(self, profile_id: str) -> None:
+        self._prune_finished_workers()
         if profile_id in self.workers:
             return
         worker = BrowserWorker(self.store, profile_id)
         worker.state_changed.connect(self._browser_state)
+        worker.finished.connect(
+            lambda pid=profile_id, current=worker: self._worker_finished(
+                pid, current
+            )
+        )
         worker.finished.connect(worker.deleteLater)
         self.workers[profile_id] = worker
         worker.start()
@@ -941,6 +993,20 @@ class MainWindow(QMainWindow):
         else:
             self.status.setText(message)
 
+    def _worker_finished(self, profile_id: str, worker: BrowserWorker) -> None:
+        if self.workers.get(profile_id) is worker:
+            self.workers.pop(profile_id, None)
+            self.refresh()
+
+    def _prune_finished_workers(self) -> None:
+        for profile_id, worker in list(self.workers.items()):
+            try:
+                running = worker.isRunning()
+            except RuntimeError:
+                running = False
+            if not running:
+                self.workers.pop(profile_id, None)
+
     @staticmethod
     def _format_time(value: Optional[str]) -> str:
         if not value:
@@ -951,6 +1017,7 @@ class MainWindow(QMainWindow):
             return value
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._prune_finished_workers()
         if self.workers:
             QMessageBox.information(
                 self,

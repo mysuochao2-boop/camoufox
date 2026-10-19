@@ -92,21 +92,118 @@ def test_subscription_url_can_be_reconstructed_for_editing():
     )
 
 
+def test_hong_kong_subscription_host_is_supported():
+    host, token = parse_subscription_url(
+        "https://proxy-hk.51proxy.org/sub/secret-token"
+    )
+
+    assert host == "proxy-hk.51proxy.org"
+    assert token == "secret-token"
+    nodes = parse_socksbridge_subscription(
+        SUBSCRIPTION.replace("proxy.51proxy.org", host),
+        host=host,
+        token=token,
+    )
+    assert [node.id for node in nodes] == ["proxy-002", "proxy-005"]
+
+    profile = new_profile(name="Hong Kong gateway")
+    profile["socksbridge"] = {
+        "enabled": True,
+        "host": host,
+        "node_id": "proxy-002",
+        "node_label": "US North Carolina | proxy-002",
+        "credential_ref": f"profile/{profile['id']}",
+    }
+    validate_profile(profile)
+    config = build_mihomo_config(
+        MihomoBinding(profile["id"], host, "proxy-002", token),
+        listener_port=41001,
+        controller_port=41002,
+        controller_secret="controller-secret",
+    )
+    assert config["proxies"][0]["server"] == host
+
+
+def test_subscription_url_rejects_an_unapproved_host():
+    with pytest.raises(ValueError, match="host"):
+        parse_subscription_url("https://example.com/sub/secret-token")
+
+
+def test_subscription_fetch_ignores_environment_proxies(monkeypatch):
+    class Response:
+        is_redirect = False
+        encoding = "utf-8"
+        closed = False
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def iter_content(_size):
+            yield SUBSCRIPTION.encode()
+
+        def close(self):
+            self.closed = True
+
+    class Session:
+        trust_env = True
+        closed = False
+
+        def get(self, url, **_kwargs):
+            assert url == "https://proxy.51proxy.org/sub/secret-token"
+            assert self.trust_env is False
+            return response
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+    session = Session()
+    monkeypatch.setattr(
+        "camoufox.desktop.socksbridge.requests.get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("global requests.get inherits proxy variables")
+        ),
+    )
+    monkeypatch.setattr(
+        "camoufox.desktop.socksbridge.requests.Session", lambda: session
+    )
+
+    nodes = fetch_socksbridge_nodes("proxy.51proxy.org", "secret-token")
+
+    assert [node.id for node in nodes] == ["proxy-002", "proxy-005"]
+    assert response.closed is True
+    assert session.closed is True
+
+
 def test_subscription_network_error_does_not_expose_token(monkeypatch):
     import requests
 
-    def fail(*_args, **_kwargs):
-        raise requests.RequestException(
-            "failed https://proxy.51proxy.org/sub/secret-token"
-        )
+    class Session:
+        trust_env = True
+        closed = False
 
-    monkeypatch.setattr("camoufox.desktop.socksbridge.requests.get", fail)
+        def get(self, *_args, **_kwargs):
+            assert self.trust_env is False
+            raise requests.RequestException(
+                "failed https://proxy.51proxy.org/sub/secret-token"
+            )
+
+        def close(self):
+            self.closed = True
+
+    session = Session()
+    monkeypatch.setattr(
+        "camoufox.desktop.socksbridge.requests.Session", lambda: session
+    )
 
     with pytest.raises(ValueError) as caught:
         fetch_socksbridge_nodes("proxy.51proxy.org", "secret-token")
 
     assert "secret-token" not in str(caught.value)
     assert caught.value.__cause__ is None
+    assert session.closed is True
 
 
 def test_mihomo_config_is_fixed_exit_and_fail_closed():
@@ -136,9 +233,39 @@ def test_mihomo_config_is_fixed_exit_and_fail_closed():
         }
     ]
     assert config["proxies"][0]["password"] == "secret-token"
-    assert config["proxies"][0]["ip-version"] == "ipv6-prefer"
+    assert config["proxies"][0]["ip-version"] == "ipv4-prefer"
     assert config["proxies"][0]["ws-opts"]["path"] == "/trojan/proxy-002"
     assert config["proxies"][0]["udp"] is False
+    assert config["rules"] == ["NETWORK,UDP,REJECT", "MATCH,REJECT"]
+    assert "DIRECT" not in str(config)
+
+
+def test_mihomo_can_dial_socksbridge_through_a_local_http_proxy():
+    config = build_mihomo_config(
+        MihomoBinding(
+            profile_id="a" * 32,
+            host="proxy-hk.51proxy.org",
+            node_id="proxy-008",
+            token="secret-token",
+            upstream_proxy={
+                "type": "http",
+                "host": "127.0.0.1",
+                "port": 7890,
+            },
+        ),
+        listener_port=41001,
+        controller_port=41002,
+        controller_secret="controller-secret",
+    )
+
+    assert config["proxies"][0]["dialer-proxy"] == "local-upstream"
+    assert config["proxies"][1] == {
+        "name": "local-upstream",
+        "type": "http",
+        "server": "127.0.0.1",
+        "port": 7890,
+        "udp": False,
+    }
     assert config["rules"] == ["NETWORK,UDP,REJECT", "MATCH,REJECT"]
     assert "DIRECT" not in str(config)
 
@@ -206,11 +333,43 @@ def test_edit_dialog_selects_the_saved_socksbridge_node():
         "node_id": "proxy-002",
         "node_label": "US North Carolina | proxy-002",
         "credential_ref": f"profile/{profile['id']}",
+        "upstream_proxy": {
+            "type": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+        },
     }
 
     dialog = ProfileDialog(profile, credential_store=Credentials())
     try:
         assert dialog.socksbridge_node.currentData() == "proxy-002"
+        assert dialog.socksbridge_upstream_enabled.isChecked() is True
+        assert dialog.socksbridge_upstream_port.value() == 7890
+    finally:
+        dialog.close()
+        application.processEvents()
+
+
+def test_new_profile_uses_the_keychain_default_subscription():
+    from PySide6.QtWidgets import QApplication
+
+    from camoufox.desktop.main import ProfileDialog
+
+    class Credentials:
+        @staticmethod
+        def get_default_subscription():
+            return "https://proxy.51proxy.org/sub/secret-token"
+
+    application = QApplication.instance() or QApplication([])
+    dialog = ProfileDialog(credential_store=Credentials())
+    try:
+        assert dialog.socksbridge_subscription.text() == (
+            "https://proxy.51proxy.org/sub/secret-token"
+        )
+        assert dialog._pending_socksbridge == (
+            "proxy.51proxy.org",
+            "secret-token",
+        )
     finally:
         dialog.close()
         application.processEvents()
@@ -241,6 +400,26 @@ def test_mihomo_binding_rejects_a_profile_path_injection():
         )
 
 
+def test_mihomo_rejects_an_unavailable_local_upstream(monkeypatch, tmp_path: Path):
+    def unavailable(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(
+        "camoufox.desktop.mihomo.socket.create_connection", unavailable
+    )
+    supervisor = MihomoSupervisor(binary=tmp_path / "mihomo")
+    binding = MihomoBinding(
+        profile_id="a" * 32,
+        host="proxy-hk.51proxy.org",
+        node_id="proxy-008",
+        token="secret-token",
+        upstream_proxy={"type": "http", "host": "127.0.0.1", "port": 7890},
+    )
+
+    with pytest.raises(RuntimeError, match="Local upstream proxy is unavailable"):
+        supervisor.start(binding)
+
+
 def test_socksbridge_profile_contains_reference_but_no_secret(tmp_path: Path):
     profile = new_profile(name="Fixed exit", target_os="macos")
     profile["socksbridge"] = {
@@ -249,6 +428,11 @@ def test_socksbridge_profile_contains_reference_but_no_secret(tmp_path: Path):
         "node_id": "proxy-002",
         "node_label": "US North Carolina | proxy-002",
         "credential_ref": f"profile/{profile['id']}",
+        "upstream_proxy": {
+            "type": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+        },
     }
 
     validate_profile(profile)
@@ -268,6 +452,27 @@ def test_socksbridge_profile_contains_reference_but_no_secret(tmp_path: Path):
     }
     assert "secret" not in str(profile)
     assert profile["socksbridge"]["credential_ref"].endswith(profile["id"])
+
+
+def test_socksbridge_profile_accepts_only_a_loopback_upstream_proxy():
+    profile = new_profile(name="Chained fixed exit")
+    profile["socksbridge"] = {
+        "enabled": True,
+        "host": "proxy-hk.51proxy.org",
+        "node_id": "proxy-008",
+        "node_label": "US California | proxy-008",
+        "credential_ref": f"profile/{profile['id']}",
+        "upstream_proxy": {
+            "type": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+        },
+    }
+
+    validate_profile(profile)
+    profile["socksbridge"]["upstream_proxy"]["host"] = "192.0.2.1"
+    with pytest.raises(ValueError, match="loopback"):
+        validate_profile(profile)
 
 
 def test_socksbridge_profile_rejects_embedded_token():
@@ -293,6 +498,11 @@ def test_duplicate_gets_its_own_credential_reference(tmp_path: Path):
         "node_id": "proxy-002",
         "node_label": "US North Carolina | proxy-002",
         "credential_ref": f"profile/{profile['id']}",
+        "upstream_proxy": {
+            "type": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+        },
     }
     original = store.save(profile)
 
@@ -315,6 +525,11 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
         "node_id": "proxy-002",
         "node_label": "US North Carolina | proxy-002",
         "credential_ref": f"profile/{profile['id']}",
+        "upstream_proxy": {
+            "type": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+        },
     }
     profile = store.save(profile)
     events = []
@@ -344,6 +559,11 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
             events.append("mihomo-start")
             assert binding.node_id == "proxy-002"
             assert binding.token == "secret-token"
+            assert binding.upstream_proxy == {
+                "type": "http",
+                "host": "127.0.0.1",
+                "port": 7890,
+            }
             return Managed()
 
     class Page:

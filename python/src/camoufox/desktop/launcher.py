@@ -205,6 +205,7 @@ def run_profile(
                         host=socksbridge["host"],
                         node_id=socksbridge["node_id"],
                         token=token,
+                        upstream_proxy=socksbridge.get("upstream_proxy"),
                     )
                 )
             )

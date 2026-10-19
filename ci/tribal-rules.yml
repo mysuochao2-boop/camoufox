@@ -163,16 +163,23 @@ rules:
       - "https://github.com/mysuochao2-boop/socksbridge/blob/main/docs/FINGERPRINT_BROWSER_MIHOMO_INTEGRATION.md"
       - "Mihomo common proxy fields: ip-version controls the address used to reach a domain-named outbound proxy"
       - "https://wiki.metacubex.one/en/config/proxies/#ip-version"
+      - "Mihomo dialer-proxy chains one outbound through another while preserving the final proxy as the website-visible exit"
+      - "https://wiki.metacubex.one/en/config/proxies/dialer-proxy/"
+      - "2026-10-17 macOS diagnosis: the gateway IPv6 route timed out after 12 seconds while IPv4 completed, and fixed exits returned repeated 502 and read timeouts"
     rationale: >-
       Auto and Random routes change an identity's network fingerprint, while a
       DIRECT fallback reveals its real network. Desktop therefore accepts only
       stable proxy-NNN SocksBridge routes, validates Mihomo before launching the
       browser, rejects unmatched and UDP traffic, and closes the browser if the
       managed core exits. The gateway connection accepts both IP families and
-      prefers IPv6 without adding a direct route, because a host may reach only
-      one of the gateway domain's address families. Subscription credentials
-      stay in the operating-system keychain rather than the environment JSON or
-      a process argument.
+      prefers IPv4 without adding a direct route, because a host may reach only
+      one of the gateway domain's address families. IPv4 is preferred because
+      the gateway's advertised IPv6 route has produced repeatable connection
+      stalls; IPv6 remains available as the fallback. An optional loopback HTTP
+      dialer can carry the gateway connection through a local proxy, but an
+      unavailable dialer fails closed instead of removing the chain. Subscription
+      credentials stay in the operating-system keychain rather than the
+      environment JSON or a process argument.
 
   # -------------------------------------------------------------------------
   # Fonts

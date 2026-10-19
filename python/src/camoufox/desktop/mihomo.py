@@ -23,7 +23,11 @@ from camoufox.exceptions import InvalidIP
 from camoufox.ip import resolve_proxy_exit_ip
 
 from .profiles import default_data_dir
-from .socksbridge import NODE_ID_PATTERN, SOCKSBRIDGE_HOST
+from .socksbridge import (
+    NODE_ID_PATTERN,
+    SOCKSBRIDGE_HOSTS,
+    normalize_local_upstream_proxy,
+)
 
 
 MIHOMO_VERSION = "1.19.32"
@@ -64,6 +68,7 @@ class MihomoBinding:
     host: str
     node_id: str
     token: str
+    upstream_proxy: Optional[dict[str, Any]] = None
 
 
 def build_mihomo_config(
@@ -75,11 +80,48 @@ def build_mihomo_config(
 ) -> dict[str, Any]:
     if not PROFILE_ID_PATTERN.fullmatch(binding.profile_id):
         raise ValueError("Invalid environment ID")
-    if binding.host != SOCKSBRIDGE_HOST:
+    if binding.host not in SOCKSBRIDGE_HOSTS:
         raise ValueError("Unsupported SocksBridge host")
     if not NODE_ID_PATTERN.fullmatch(binding.node_id):
         raise ValueError("Invalid SocksBridge node ID")
+    upstream_proxy = normalize_local_upstream_proxy(binding.upstream_proxy)
     proxy_name = f"sb-{binding.node_id}"
+    proxy = {
+        "name": proxy_name,
+        "type": "trojan",
+        "server": binding.host,
+        "port": 443,
+        "ip-version": "ipv4-prefer",
+        "password": binding.token,
+        "sni": binding.host,
+        "skip-cert-verify": False,
+        "network": "ws",
+        "udp": False,
+        "ws-opts": {
+            "path": f"/trojan/{binding.node_id}",
+            "headers": {"Host": binding.host},
+        },
+        "smux": {
+            "enabled": True,
+            "protocol": "yamux",
+            "max-connections": 2,
+            "min-streams": 4,
+            "statistic": True,
+            "only-tcp": True,
+        },
+    }
+    proxies = [proxy]
+    if upstream_proxy:
+        proxy["dialer-proxy"] = "local-upstream"
+        proxies.append(
+            {
+                "name": "local-upstream",
+                "type": upstream_proxy["type"],
+                "server": upstream_proxy["host"],
+                "port": upstream_proxy["port"],
+                "udp": False,
+            }
+        )
     return {
         "allow-lan": False,
         "mode": "rule",
@@ -87,32 +129,7 @@ def build_mihomo_config(
         "ipv6": True,
         "external-controller": f"127.0.0.1:{controller_port}",
         "secret": controller_secret,
-        "proxies": [
-            {
-                "name": proxy_name,
-                "type": "trojan",
-                "server": binding.host,
-                "port": 443,
-                "ip-version": "ipv6-prefer",
-                "password": binding.token,
-                "sni": binding.host,
-                "skip-cert-verify": False,
-                "network": "ws",
-                "udp": False,
-                "ws-opts": {
-                    "path": f"/trojan/{binding.node_id}",
-                    "headers": {"Host": binding.host},
-                },
-                "smux": {
-                    "enabled": True,
-                    "protocol": "yamux",
-                    "max-connections": 2,
-                    "min-streams": 4,
-                    "statistic": True,
-                    "only-tcp": True,
-                },
-            }
-        ],
+        "proxies": proxies,
         "listeners": [
             {
                 "name": f"fp-{binding.profile_id[:16]}",
@@ -313,6 +330,18 @@ class MihomoSupervisor:
         self.binary = Path(binary) if binary else None
 
     def start(self, binding: MihomoBinding) -> ManagedMihomo:
+        upstream_proxy = normalize_local_upstream_proxy(binding.upstream_proxy)
+        if upstream_proxy:
+            try:
+                with socket.create_connection(
+                    (upstream_proxy["host"], upstream_proxy["port"]), timeout=1
+                ):
+                    pass
+            except OSError:
+                raise RuntimeError(
+                    "Local upstream proxy is unavailable at "
+                    f"{upstream_proxy['host']}:{upstream_proxy['port']}"
+                ) from None
         binary = self.binary or MihomoBinaryManager().ensure()
         if self.network_root:
             _private_directory(self.network_root)

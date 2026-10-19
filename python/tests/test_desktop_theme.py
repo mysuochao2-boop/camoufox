@@ -26,3 +26,48 @@ def test_controls_have_explicit_variants_and_popup_chrome():
     assert "QComboBox QAbstractItemView::item" in style
     assert "QSpinBox::up-button" in style
     assert "QDialogButtonBox" in style
+
+
+def test_main_window_exit_prunes_a_finished_browser_worker(monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    from camoufox.desktop.main import MainWindow
+    from camoufox.desktop.profiles import ProfileStore
+
+    class FinishedWorker:
+        @staticmethod
+        def isRunning():
+            return False
+
+    class DeletedWorker:
+        @staticmethod
+        def isRunning():
+            raise RuntimeError("Internal C++ object already deleted")
+
+    class CloseEvent:
+        accepted = False
+        ignored = False
+
+        def accept(self):
+            self.accepted = True
+
+        def ignore(self):
+            self.ignored = True
+
+    application = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(
+        "camoufox.desktop.main.QMessageBox.information",
+        lambda *_args, **_kwargs: None,
+    )
+    window = MainWindow(ProfileStore(tmp_path))
+    window.workers["finished-profile"] = FinishedWorker()
+    window.workers["deleted-profile"] = DeletedWorker()
+    event = CloseEvent()
+
+    window.closeEvent(event)
+
+    assert event.accepted is True
+    assert event.ignored is False
+    assert window.workers == {}
+    window.deleteLater()
+    application.processEvents()
