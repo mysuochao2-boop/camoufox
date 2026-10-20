@@ -385,6 +385,16 @@ def test_start_page_timeout_does_not_stop_the_browser():
     navigate_start_page(Page(), "https://www.google.com/")
 
 
+def test_start_page_network_error_does_not_stop_the_browser():
+    from playwright.sync_api import Error as PlaywrightError
+
+    class Page:
+        def goto(self, url, **kwargs):
+            raise PlaywrightError("Page.goto: NS_ERROR_NET_RESET")
+
+    navigate_start_page(Page(), "https://www.browserscan.net/zh")
+
+
 def test_mihomo_binding_rejects_a_profile_path_injection():
     with pytest.raises(ValueError, match="environment ID"):
         build_mihomo_config(
@@ -570,6 +580,9 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
         def goto(self, url, **kwargs):
             events.append(f"goto:{url}:{kwargs.get('wait_until')}")
 
+        def evaluate(self, script, url):
+            events.append(f"tab:{url}")
+
     class Context:
         pages = []
 
@@ -599,6 +612,7 @@ def test_profile_starts_browser_only_inside_managed_mihomo(monkeypatch, tmp_path
     assert browser_options["proxy"] == Managed.proxy
     assert browser_options["geoip"] == Managed.exit_ip
     assert f"goto:{profile['start_url']}:commit" in events
+    assert "tab:https://dev.meta.ai" in events
     assert events.index("mihomo-enter") < events.index("browser-enter")
     assert events[-2:] == ["browser-exit", "mihomo-exit"]
 
@@ -642,6 +656,9 @@ def test_socksbridge_opens_when_exit_ip_lookup_fails(monkeypatch, tmp_path: Path
 
     class Page:
         def goto(self, url, **kwargs):
+            pass
+
+        def evaluate(self, script, url):
             pass
 
     class Context:

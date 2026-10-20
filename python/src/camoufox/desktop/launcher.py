@@ -14,6 +14,7 @@ from .socksbridge import SocksBridgeCredentialStore
 
 
 SESSION_FILE_NAME = "desktop-tabs.json"
+FIRST_LAUNCH_TAB_URL = "https://dev.meta.ai"
 RESTORABLE_SCHEMES = {"file", "http", "https"}
 PAGE_CHANGE_STABLE_POLLS = 2
 OPEN_TAB_SCRIPT = "(url) => { window.open(url, '_blank'); }"
@@ -76,11 +77,11 @@ def wait_for_browser_close(
 
 
 def navigate_start_page(page: Any, start_url: str) -> None:
-    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from playwright.sync_api import Error as PlaywrightError
 
     try:
         page.goto(start_url, wait_until="commit")
-    except PlaywrightTimeoutError:
+    except PlaywrightError:
         # A slow or unavailable home page must not close an otherwise healthy browser.
         pass
 
@@ -189,6 +190,7 @@ def run_profile(
     profile_dir = store.runtime_profile_dir(profile)
     profile_dir.mkdir(parents=True, exist_ok=True)
     session_file = profile_dir / SESSION_FILE_NAME
+    first_launch = not session_file.exists()
 
     with ExitStack() as stack:
         options = launch_kwargs(profile, profile_dir)
@@ -222,8 +224,11 @@ def run_profile(
         # a second window was briefly visible on slow Windows startups.
         page = _first_page(context)
         start_url = str(profile.get("start_url") or "").strip()
-        if not restore_saved_tabs(page, session_file) and start_url:
-            navigate_start_page(page, start_url)
+        if not restore_saved_tabs(page, session_file):
+            if start_url:
+                navigate_start_page(page, start_url)
+            if first_launch:
+                page.evaluate(OPEN_TAB_SCRIPT, FIRST_LAUNCH_TAB_URL)
         store.mark_opened(profile_id)
         on_started()
         last_saved_urls: Optional[list[str]] = None
