@@ -90,6 +90,11 @@ def validate_ip(ip: str) -> None:
 # fails the whole launch. Direct probes keep 5 s.
 DIRECT_IP_TIMEOUT = 5
 PROXIED_IP_TIMEOUT = 15
+# public_ip() through a proxy polls up to 9 URLs (HTTP first, then HTTPS). The
+# single ip-api lookup in proxy_exit_geo keeps upstream's 15 s, but the polled
+# list gets a shorter per-URL timeout so a dead proxy fails in about
+# 15 + 9 x 6 = 69 s instead of piling up to 15 + 9 x 15 = 150 s (2.5 min).
+PROXIED_IP_LIST_TIMEOUT = 6
 
 
 def proxy_exit_geo(proxy: str) -> Tuple[str, str]:
@@ -190,7 +195,7 @@ def public_ip(proxy: Optional[str] = None) -> str:
             resp = requests.get(
                 url,
                 proxies=proxies,
-                timeout=PROXIED_IP_TIMEOUT if proxy else DIRECT_IP_TIMEOUT,
+                timeout=PROXIED_IP_LIST_TIMEOUT if proxy else DIRECT_IP_TIMEOUT,
                 verify=True,
             )
             resp.raise_for_status()

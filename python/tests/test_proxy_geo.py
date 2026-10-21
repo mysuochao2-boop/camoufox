@@ -129,7 +129,39 @@ def test_lookups_through_a_proxy_get_longer_than_direct_ones(monkeypatch):
     ip.public_ip.cache_clear()
     assert [(t, proxied) for _, t, proxied in timeouts] == [
         (ip.DIRECT_IP_TIMEOUT, False),
-        (ip.PROXIED_IP_TIMEOUT, True),
+        (ip.PROXIED_IP_LIST_TIMEOUT, True),
         (ip.PROXIED_IP_TIMEOUT, True),
     ]
     assert ip.PROXIED_IP_TIMEOUT > ip.DIRECT_IP_TIMEOUT
+    assert ip.PROXIED_IP_LIST_TIMEOUT > ip.DIRECT_IP_TIMEOUT
+
+
+def test_a_dead_proxy_polls_the_ip_list_with_the_short_timeout(monkeypatch):
+    # Every polled URL fails through the proxy: each must use the short list
+    # timeout, while a direct lookup keeps DIRECT_IP_TIMEOUT.
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs["timeout"], bool(kwargs.get("proxies"))))
+        if kwargs.get("proxies"):
+            raise ip.requests.exceptions.ProxyError("proxy is down")
+        response = mock.MagicMock()
+        response.headers = {"Content-Type": "text/plain"}
+        response.text = "203.0.113.7"
+        return response
+
+    monkeypatch.setattr(ip.requests, "get", get)
+    ip.public_ip.cache_clear()
+    try:
+        with pytest.raises(InvalidIP):
+            ip.public_ip("http://u:p@proxy.example.com:8080")
+        assert ip.public_ip() == "203.0.113.7"
+    finally:
+        ip.public_ip.cache_clear()
+
+    proxied = [c for c in calls if c[2]]
+    direct = [c for c in calls if not c[2]]
+    assert len(proxied) == len(ip.HTTP_IP_URLS) + len(ip.HTTPS_IP_URLS) == 9
+    assert {t for _, t, _ in proxied} == {ip.PROXIED_IP_LIST_TIMEOUT}
+    assert [t for _, t, _ in direct] == [ip.DIRECT_IP_TIMEOUT]
+    assert ip.PROXIED_IP_LIST_TIMEOUT < ip.PROXIED_IP_TIMEOUT
