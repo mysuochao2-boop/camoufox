@@ -16,6 +16,7 @@ from functools import lru_cache
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .fingerprints import is_software_renderer
+from .gpudisplay import GPU_PREFS
 
 BASELINE_OVERRIDES_PREF = 'privacy.baselineFingerprintingProtection.overrides'
 
@@ -76,27 +77,42 @@ def set_webgpu(prefs: Dict[str, Any], target_os: str, gpu: Gpu, host: Optional[G
         prefs.setdefault(WEBGPU_BLOCKLIST_PREF, FEATURE_STATUS_OK if own_adapter else FEATURE_BLOCKED_DEVICE)
 
 
-def host_gpu(executable_path: str, headless: bool, env: Mapping[str, Any]) -> Optional[Gpu]:
+def host_gpu(
+    executable_path: str, headless: bool, env: Mapping[str, Any], prefs: Mapping[str, Any]
+) -> Optional[Gpu]:
     """The (vendor, renderer) this machine's Firefox reports, or None without WebGL.
 
-    Read from the binary about to launch, with no identity applied. The probe
-    always runs headless so a headed Camoufox open does not flash a throwaway
-    window (stock Firefox without FONTCONFIG/locale → mojibake chrome, then
-    close). The launch env (DISPLAY, etc.) is still passed. ``headless`` is
-    kept for call-site compatibility and ignored: headless vs headed can
-    report different devices on some hosts; that residual risk is preferred
-    over a visible flash.
+    Read from the binary about to launch, with no identity applied, under the
+    same display and the same rendering prefs: Xvfb, a GPU display and a real
+    display can each render on a different device. The strings are the ones
+    Firefox sanitizes itself.
+
+    The probe runs headless so a headed Camoufox open does not flash a
+    throwaway window (stock Firefox without FONTCONFIG/locale → mojibake
+    chrome, then close). The launch env (DISPLAY, etc.) is still passed. The
+    one exception is a headed launch on a GPU display (headless="virtual-gpu",
+    recognised by its GPU prefs): that display is an off-screen Xorg, so a
+    headed probe flashes nothing and must read the device the launch renders
+    on. Elsewhere headless vs headed can report different devices on some
+    hosts; that residual risk is preferred over a visible flash.
     """
-    _ = headless  # call-site compat; probe launch is always headless
+    gpu_prefs = tuple(sorted((k, prefs[k]) for k in GPU_PREFS if k in prefs))
+    probe_headless = bool(headless) or not gpu_prefs
     return _host_gpu(
         str(executable_path),
-        True,
+        probe_headless,
         tuple(sorted((k, str(v)) for k, v in env.items() if not k.startswith(_LAUNCHER_ENV))),
+        gpu_prefs,
     )
 
 
 @lru_cache(maxsize=None)
-def _host_gpu(executable_path: str, headless: bool, env: Tuple[Tuple[str, str], ...]) -> Optional[Gpu]:
+def _host_gpu(
+    executable_path: str,
+    headless: bool,
+    env: Tuple[Tuple[str, str], ...],
+    prefs: Tuple[Tuple[str, Any], ...],
+) -> Optional[Gpu]:
     def read() -> Optional[Gpu]:
         from playwright.sync_api import sync_playwright
 
@@ -106,7 +122,7 @@ def _host_gpu(executable_path: str, headless: bool, env: Tuple[Tuple[str, str], 
                 headless=headless,
                 env=dict(env),
                 # The launch forces WebGL on, which can choose another device.
-                firefox_user_prefs={'webgl.force-enabled': True},
+                firefox_user_prefs={**dict(prefs), 'webgl.force-enabled': True},
             )
             try:
                 gpu = browser.new_page().evaluate(_READ_GPU)

@@ -1,10 +1,11 @@
 name: Tests
 
-# The repository's test pipeline. Runs on every pull request, on demand, and --
-# via workflow_call -- from release.yml on every push to main (a release is only
-# built from a commit this pipeline passed) and from any workflow that needs to
-# test a specific browser version, so a contributor's pull request, a release and
-# an automated Firefox bump are judged by exactly the same checks.
+# The repository's test pipeline. Runs on every pull request, every push to
+# main, on demand, and -- via workflow_call -- from release.yml before every
+# prerelease (a release is only built from a commit this pipeline passed) and
+# from any workflow that needs to test a specific browser version, so a
+# contributor's pull request, a release and an automated Firefox bump are judged
+# by exactly the same checks.
 #
 # The browser version comes from upstream.sh unless a caller passes one in,
 # which is what lets one pipeline test both a pull request and a version bump.
@@ -43,7 +44,8 @@ name: Tests
 
 on:
   pull_request:
-  # Pushes to main are tested by release.yml, which calls this workflow.
+  push:
+    branches: [main]
   schedule:
     # Keeps the ccache alive. GitHub evicts a cache after 7 days unused, and a
     # cold Firefox build is over an hour; twice a week keeps pull-request builds
@@ -77,7 +79,7 @@ on:
         default: "6"
         type: string
       ref:
-        description: "Commit to test; defaults to the calling workflow's ref"
+        description: "Commit to test; defaults to the calling workflow's commit"
         required: false
         type: string
     secrets:
@@ -125,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -239,7 +241,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
           # Full history: config-keys-are-never-deleted checks every key
           # browser/settings/properties.json has ever declared.
           fetch-depth: 0
@@ -302,7 +304,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -349,7 +351,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           # Not PYTHON_VERSION: the golden fixtures are regenerated from this
@@ -416,7 +418,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -476,7 +478,7 @@ jobs:
       # Checkout first, because the cache key below is a hash of the tree.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Hash the inputs that can change compiled output
         id: native
@@ -719,7 +721,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -802,7 +804,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -863,7 +865,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -876,6 +878,10 @@ jobs:
           python3 python/scripts/pin-fpgen-model.py
       # Fonts and properties.json are staged into the artifact by the build job;
       # `make stage-fonts` here would find no source tree and do nothing.
+      # ipv4-only-network.py builds its test network in an unprivileged user
+      # namespace, which Ubuntu's AppArmor denies to programs without a profile.
+      - if: matrix.leg == 'spoofing'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: matrix.leg != 'skiplist'
         run: xvfb-run -a python3 -m ci.run_patch_guards --group "${{ matrix.leg }}" --binary "$CAMOUFOX_BINARY"
       - name: Every skiplist entry is still failing
@@ -914,7 +920,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -960,7 +966,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1027,7 +1033,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1088,7 +1094,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1121,7 +1127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: ./.github/actions/prepare-browser
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -1173,7 +1179,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}

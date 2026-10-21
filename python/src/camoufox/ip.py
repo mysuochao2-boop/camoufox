@@ -1,3 +1,4 @@
+import ipaddress
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -65,17 +66,30 @@ class Proxy:
 
 @lru_cache(128, typed=True)
 def valid_ipv4(ip: str) -> bool:
-    return bool(re.match(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', ip))
+    try:
+        return isinstance(ipaddress.ip_address(ip), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 
 @lru_cache(128, typed=True)
 def valid_ipv6(ip: str) -> bool:
-    return bool(re.match(r'^(([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4})$', ip))
+    try:
+        return isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address)
+    except ValueError:
+        return False
 
 
 def validate_ip(ip: str) -> None:
     if not valid_ipv4(ip) and not valid_ipv6(ip):
         raise InvalidIP(f"Invalid IP address: {ip}")
+
+
+# Probing the exit IP through a proxy adds a hop and a TLS handshake behind it; 5 s
+# is not enough for a proxy that routes the long way round, and every URL timing out
+# fails the whole launch. Direct probes keep 5 s.
+DIRECT_IP_TIMEOUT = 5
+PROXIED_IP_TIMEOUT = 15
 
 
 def proxy_exit_geo(proxy: str) -> Tuple[str, str]:
@@ -88,7 +102,7 @@ def proxy_exit_geo(proxy: str) -> Tuple[str, str]:
         resp = requests.get(
             "http://ip-api.com/json?fields=status,message,query,timezone",
             proxies=Proxy.as_requests_proxy(proxy),
-            timeout=10,
+            timeout=PROXIED_IP_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -138,6 +152,24 @@ def _ip_from_response(resp: requests.Response) -> str:
 
 
 @lru_cache(maxsize=None)
+def public_ipv6() -> Optional[str]:
+    """
+    This host's public IPv6 address, or None when it has none it can reach the
+    internet from. The hosts have AAAA records only, so an answer proves the route.
+    """
+    for url in ("https://api6.ipify.org", "https://v6.ident.me"):
+        try:
+            resp = requests.get(url, timeout=DIRECT_IP_TIMEOUT, verify=True)
+            resp.raise_for_status()
+        except requests.RequestException:
+            continue
+        ip = resp.text.strip()
+        if valid_ipv6(ip):
+            return ip
+    return None
+
+
+@lru_cache(maxsize=None)
 def public_ip(proxy: Optional[str] = None) -> str:
     """
     Sends a request to a public IP api.
@@ -158,7 +190,7 @@ def public_ip(proxy: Optional[str] = None) -> str:
             resp = requests.get(
                 url,
                 proxies=proxies,
-                timeout=5,
+                timeout=PROXIED_IP_TIMEOUT if proxy else DIRECT_IP_TIMEOUT,
                 verify=True,
             )
             resp.raise_for_status()

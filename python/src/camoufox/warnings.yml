@@ -27,6 +27,11 @@ custom_fingerprint: >-
 proxy_without_geoip: >-
     When using a proxy, it is heavily recommended that you pass `geoip=True`.
 
+ipv6_elsewhere: >-
+    This machine's IPv6 address geolocates somewhere other than the IPv4 address the identity was drawn from,
+    so the browser behaves as on an IPv4-only network and sites that only have an IPv6 address will not load.
+    A VPN that tunnels only IPv4 is the usual cause. Use a proxy, or route IPv6 through the VPN as well.
+
 ff_version: >-
     Spoofing the Firefox version will likely lead to detection.
     If rotating the Firefox version is absolutely necessary, it would be more advisable to
@@ -57,6 +62,11 @@ canvas_noise: >-
     do this, so the browser reads as a privacy-hardened Firefox. It is on because
     the identity claims another OS or GPU than this machine's, whose canvas would
     show the real one. Pass `canvas_noise=False` to keep stock canvas behaviour.
+
+gpu_software_rendering: >-
+    The browser on the headless="virtual-gpu" display never rendered on the GPU, so it
+    renders canvas and WebGL in software, which a page can tell from the GPU the
+    identity claims. Pass `require_gpu=True` (the default) to fail the launch instead.
 
 block_images: >-
     Blocking image requests has been reported to cause detection issues on major WAFs.
