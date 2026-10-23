@@ -3,6 +3,7 @@
  * launch_options() does (tests/launch-golden.test.ts). `utilsDeps` holds what the
  * Python tests monkeypatch.
  */
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -188,6 +189,10 @@ export const utilsDeps = {
 	hasDisplay,
 	largestDisplay,
 	getScreenCons: (headless?: boolean) => getScreenCons(headless),
+	// Host font dirs and the fc-cache warm-up of the generated fontconfig.
+	isDir: (p: string): boolean => isDir(p),
+	warmFontconfigCache: (runtimeConf: string): boolean =>
+		warmFontconfigCache(runtimeConf),
 	print: (line: string): void => {
 		process.stdout.write(`${line}\n`);
 	},
@@ -375,6 +380,19 @@ function generateFontconfig(
 		scanDirs.map((d) => `<dir>${d}</dir>`).join("\n\t"),
 	);
 
+	// Chrome UI must stay legible. FONTCONFIG_FILE replaces all system fonts on
+	// Linux, so chrome (exempt from the fingerprint allowlist in Gecko) still
+	// only sees the bundle. Two rules, as in Python's _generate_fontconfig:
+	//   1) Never put CJK faces *first* in system-ui prefer -- that made Latin
+	//      chrome (tab titles, urlbar placeholder) pick Noto Sans CJK / a bad
+	//      OTC face and paint wrong glyphs (not tofu).
+	//   2) Append host system font dirs *after* the bundle so real UI faces
+	//      remain reachable for chrome; bundled dirs stay first so content
+	//      named lookups still hit fingerprint fonts. MaskConfig continues to
+	//      block non-allowlisted families for content.
+	confContent = appendCjkSystemUiFallback(confContent);
+	confContent = appendHostSystemFontDirs(confContent);
+
 	// INSTALL_DIR is platformdirs' user_cache_dir("camoufox"); see paths.ts.
 	const cacheDir = path.join(utilsDeps.installDir(), "fontconfig");
 	fs.mkdirSync(cacheDir, { recursive: true });
@@ -384,10 +402,89 @@ function generateFontconfig(
 		.digest("hex")
 		.slice(0, 12);
 	const runtimeConf = path.join(cacheDir, `fonts-${contentHash}.conf`);
+	const cacheStamp = `${runtimeConf}.fc-cache-ok`;
 	if (!fs.existsSync(runtimeConf)) {
 		fs.writeFileSync(runtimeConf, confContent);
 	}
+	// Warm the fontconfig cache before the first headed paint. A cold cache on
+	// Linux makes chrome paint before CJK faces are indexed -> persistent tofu.
+	if (!fs.existsSync(cacheStamp)) {
+		try {
+			if (utilsDeps.warmFontconfigCache(runtimeConf)) {
+				fs.writeFileSync(cacheStamp, "1");
+			}
+		} catch {
+			// fc-cache missing, timed out, or stamp unwritable: launch still works;
+			// first paint may briefly lack CJK until the browser builds its cache.
+		}
+	}
 	return runtimeConf;
+}
+
+/** Add CJK faces at the *end* of system-ui prefer (Latin UI stays first). */
+export function appendCjkSystemUiFallback(conf: string): string {
+	const match =
+		/(<family>system-ui<\/family>\s*<prefer>)([\s\S]*?)(<\/prefer>)/.exec(conf);
+	if (!match || match[2].includes("Noto Sans CJK SC")) {
+		return conf;
+	}
+	const indentMatch = /\n([ \t]*)<family>/.exec(match[2]);
+	const indent = indentMatch ? indentMatch[1] : "\t\t\t";
+	const cjk =
+		`\n${indent}<family>Noto Sans CJK SC</family>` +
+		`\n${indent}<family>Noto Sans CJK TC</family>` +
+		`\n${indent}<family>Droid Sans Fallback</family>`;
+	// Insert before </prefer>, after existing Latin UI prefers.
+	const at = match.index + match[1].length + match[2].length;
+	return conf.slice(0, at) + cjk + conf.slice(at);
+}
+
+/** The host's own font directories, in Python's order (expanduser reads HOME). */
+function hostSystemFontDirs(): string[] {
+	const home = os.homedir();
+	const dirs: string[] = [];
+	for (const d of [
+		"/usr/share/fonts",
+		"/usr/local/share/fonts",
+		path.join(home, ".local/share/fonts"),
+		path.join(home, ".fonts"),
+	]) {
+		if (utilsDeps.isDir(d) && !dirs.includes(d)) {
+			dirs.push(d);
+		}
+	}
+	return dirs;
+}
+
+/** Append the host's font dirs not already named, just before </fontconfig>. */
+export function appendHostSystemFontDirs(conf: string): string {
+	const hostDirs = hostSystemFontDirs();
+	if (!hostDirs.length) {
+		return conf;
+	}
+	const additions = hostDirs
+		.filter((d) => !conf.includes(`<dir>${d}</dir>`))
+		.map((d) => `\n\t<dir>${d}</dir>`)
+		.join("");
+	if (!additions) {
+		return conf;
+	}
+	const close = "</fontconfig>";
+	const at = conf.indexOf(close);
+	if (at < 0) {
+		return conf;
+	}
+	return `${conf.slice(0, at)}${additions}\n${conf.slice(at)}`;
+}
+
+/** Run `fc-cache -f` against the runtime conf; true when it succeeded. */
+function warmFontconfigCache(runtimeConf: string): boolean {
+	const completed = spawnSync("fc-cache", ["-f"], {
+		env: { ...process.env, FONTCONFIG_FILE: runtimeConf },
+		stdio: "pipe",
+		timeout: 120_000,
+	});
+	return !completed.error && completed.status === 0;
 }
 
 function isDir(p: string): boolean {

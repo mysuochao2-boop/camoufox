@@ -697,6 +697,127 @@ describe("test_executable_path_bundle", () => {
 	});
 });
 
+describe("the generated Linux fontconfig", () => {
+	// A bundle whose fonts.conf names a system-ui alias, like the real one.
+	const SYSTEM_UI_BUNDLE = path.join(SCRATCH, "system-ui-bundle");
+	const SYSTEM_UI_EXE = path.join(SYSTEM_UI_BUNDLE, "camoufox-bin");
+	fs.mkdirSync(path.join(SYSTEM_UI_BUNDLE, "fontconfig", "linux"), {
+		recursive: true,
+	});
+	fs.mkdirSync(path.join(SYSTEM_UI_BUNDLE, "fonts"), { recursive: true });
+	fs.writeFileSync(
+		path.join(SYSTEM_UI_BUNDLE, "fontconfig", "linux", "fonts.conf"),
+		`<?xml version="1.0"?>
+<fontconfig>
+  <dir prefix="cwd">fonts</dir>
+  <alias>
+    <family>system-ui</family>
+    <prefer>
+      <family>Noto Sans UI</family>
+      <family>Segoe UI</family>
+    </prefer>
+  </alias>
+</fontconfig>
+`,
+	);
+
+	const generate = (): string => {
+		deps.getPath = (() => {
+			throw new Error("resolved against the managed install");
+		}) as any;
+		deps.osName = () => "lin";
+		const env = utils.getEnvVars({}, "lin", SYSTEM_UI_EXE);
+		return fs.readFileSync(String(env.FONTCONFIG_FILE), "utf-8");
+	};
+	const preferOf = (conf: string): string =>
+		conf
+			.split("<family>system-ui</family>", 2)[1]
+			.split("<prefer>", 2)[1]
+			.split("</prefer>", 1)[0];
+
+	beforeEach(() => {
+		deps.warmFontconfigCache = () => false;
+	});
+
+	it("keeps Latin UI ahead of CJK in system-ui", () => {
+		const prefer = preferOf(generate());
+		expect(prefer).toContain("Noto Sans CJK SC");
+		expect(prefer.indexOf("Noto Sans UI")).toBeLessThan(
+			prefer.indexOf("Noto Sans CJK SC"),
+		);
+		const first = prefer.split("<family>", 2)[1].split("</family>", 1)[0];
+		expect(first).not.toContain("CJK");
+		expect(first).not.toContain("Droid Sans Fallback");
+		// Byte for byte what Python's _append_cjk_system_ui_fallback writes: the
+		// faces go right before </prefer>, after the Latin prefers' trailing indent.
+		expect(prefer).toBe(
+			"\n      <family>Noto Sans UI</family>\n      <family>Segoe UI</family>\n    " +
+				"\n      <family>Noto Sans CJK SC</family>" +
+				"\n      <family>Noto Sans CJK TC</family>" +
+				"\n      <family>Droid Sans Fallback</family>",
+		);
+	});
+
+	it("appends the existing host font dirs after the bundle's", () => {
+		const present = new Set(["/usr/share/fonts", path.join(HOME, ".fonts")]);
+		deps.isDir = (p: string) =>
+			present.has(p) || p.startsWith(SYSTEM_UI_BUNDLE);
+		vi.stubEnv("HOME", HOME);
+		try {
+			const conf = generate();
+			const bundleAt = conf.indexOf(
+				`<dir>${path.join(SYSTEM_UI_BUNDLE, "fonts")}</dir>`,
+			);
+			const hostAt = conf.indexOf("\n\t<dir>/usr/share/fonts</dir>");
+			expect(bundleAt).toBeGreaterThan(-1);
+			expect(hostAt).toBeGreaterThan(bundleAt);
+			expect(conf).toContain(
+				`\t<dir>${path.join(HOME, ".fonts")}</dir>\n</fontconfig>`,
+			);
+			expect(conf).not.toContain(".local/share/fonts");
+			expect(conf).not.toContain("/usr/local/share/fonts");
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("adds nothing when the host has no font dirs", () => {
+		deps.isDir = (p: string) => p.startsWith(SYSTEM_UI_BUNDLE);
+		expect(generate()).not.toMatch(
+			/<dir>\/usr|share\/fonts<\/dir>|\.fonts<\/dir>/,
+		);
+	});
+
+	it("warms the fontconfig cache once per generated conf", () => {
+		const warmed: string[] = [];
+		deps.warmFontconfigCache = (conf: string) => {
+			warmed.push(conf);
+			return true;
+		};
+		// A host dir set no other test uses, so this conf (and its stamp) is new.
+		deps.isDir = (p: string) =>
+			p.startsWith(SYSTEM_UI_BUNDLE) || p === "/usr/local/share/fonts";
+		const conf = generate();
+		generate();
+		expect(conf).toContain("<dir>/usr/local/share/fonts</dir>");
+		expect(warmed).toHaveLength(1);
+		expect(fs.existsSync(`${warmed[0]}.fc-cache-ok`)).toBe(true);
+		expect(fs.readFileSync(warmed[0], "utf-8")).toBe(conf);
+	});
+
+	it("retries the warm-up next launch when fc-cache fails", () => {
+		let calls = 0;
+		deps.warmFontconfigCache = () => {
+			calls++;
+			throw new Error("fc-cache: not found");
+		};
+		deps.isDir = (p: string) => p.startsWith(SYSTEM_UI_BUNDLE);
+		generate();
+		generate();
+		expect(calls).toBe(2);
+	});
+});
+
 describe("the browser option", () => {
 	beforeEach(() => vi.stubEnv("CAMOUFOX_EXECUTABLE_PATH", ""));
 	afterEach(() => vi.unstubAllEnvs());
