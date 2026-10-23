@@ -88,6 +88,11 @@ const impitCache = new Map<string, Impit>();
 // timing out fails the whole launch. Direct probes keep 5 s.
 export const DIRECT_IP_TIMEOUT_MS = 5000;
 export const PROXIED_IP_TIMEOUT_MS = 15000;
+// publicIP() polls a list of URLs through the proxy, so a dead proxy costs one
+// timeout per URL; give each of those a shorter one (Python's
+// PROXIED_IP_LIST_TIMEOUT). The single ip-api lookup in proxyExitGeo keeps
+// PROXIED_IP_TIMEOUT_MS, and direct probes keep DIRECT_IP_TIMEOUT_MS.
+export const PROXIED_IP_LIST_TIMEOUT_MS = 6000;
 
 function getImpit(proxy?: string): Impit {
 	const key = proxy ?? "";
@@ -215,7 +220,10 @@ async function resolvePublicIP(proxy?: string): Promise<string> {
 
 	for (const url of PUBLIC_IP_URLS) {
 		try {
-			const response = await getImpit(proxy).fetch(url);
+			const response = await getImpit(proxy).fetch(
+				url,
+				proxy ? { timeout: PROXIED_IP_LIST_TIMEOUT_MS } : undefined,
+			);
 			if (!response.ok) {
 				// requests' raise_for_status()
 				throw new Error(
